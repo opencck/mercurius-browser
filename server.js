@@ -257,10 +257,11 @@ app.post('/evaluate', async (request, reply) => {
         return reply.code(422).send({ error: `скрипт не выполнен: ${String(e?.message ?? e).slice(0, 500)}` });
     } finally {
         clearTimeout(timer);
-        if (page !== s.page) {
-            await page.close().catch(() => {});
-        }
         s.busy = false;
+        if (page !== s.page) {
+            // not awaited: closing a tab with requests still held by interception can hang, the answer must not wait
+            page.close().catch(() => {});
+        }
     }
 });
 
