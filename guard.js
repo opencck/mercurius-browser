@@ -72,3 +72,32 @@ export async function refusal(url, resolve = lookup, allowed = new Set()) {
     }
     return null;
 }
+
+/**
+ * Why a request is refused while a read-only script runs; null — it may go. Only GET (and HEAD) to the page's own host:
+ * a read changes nothing on the site, and nothing read can leave for another site, not even in a query string.
+ * spec: BRIEF.md#скрипты-браузера-решение-владельца-2026-11-17
+ */
+export function readOnlyRefusal(method, url, host) {
+    let parsed;
+    try {
+        parsed = new URL(url);
+    } catch {
+        return 'не адрес';
+    }
+    if (parsed.protocol === 'data:' || parsed.protocol === 'blob:') {
+        return null;
+    }
+    if (method !== 'GET' && method !== 'HEAD') {
+        return `скрипт чтения не отправляет ${method}`;
+    }
+    if (parsed.hostname.toLowerCase() !== host.toLowerCase()) {
+        return `скрипт чтения не ходит на ${parsed.hostname}`;
+    }
+    return null;
+}
+
+/** The script file is the body of an async function: it gets args and returns what is given back. */
+export function scriptExpression(source, args) {
+    return `(async (args) => {\n${source}\n})(${JSON.stringify(args ?? {})})`;
+}

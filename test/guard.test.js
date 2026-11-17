@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { isBlockedIp, refusal } from '../guard.js';
+import { isBlockedIp, readOnlyRefusal, refusal, scriptExpression } from '../guard.js';
 
 test('private, loopback, link-local and metadata addresses are blocked', () => {
     for (const ip of ['10.1.2.3', '127.0.0.1', '169.254.169.254', '172.20.0.5', '192.168.1.1', '100.64.0.1', '0.0.0.0', '::1', 'fd00::1', 'fe80::1', '::ffff:10.0.0.1']) {
@@ -32,4 +32,19 @@ test('a host the owner allowed is let in, and no other', async () => {
     assert.equal(await refusal('http://10.0.0.1/', resolve, allowed), null);
     assert.match(await refusal('http://other.lan/', resolve, allowed), /внутренний/);
     assert.match(await refusal('file:///etc/passwd', resolve, new Set(['etc'])), /схема/);
+});
+
+test('a read-only script reads its own site with GET and sends nothing', () => {
+    assert.equal(readOnlyRefusal('GET', 'https://web.telegram.org/k/api/list', 'web.telegram.org'), null);
+    assert.equal(readOnlyRefusal('HEAD', 'https://web.telegram.org/x', 'web.telegram.org'), null);
+    assert.equal(readOnlyRefusal('GET', 'data:image/png;base64,AAAA', 'web.telegram.org'), null, 'inline data is not sent anywhere');
+    assert.match(readOnlyRefusal('POST', 'https://web.telegram.org/api/send', 'web.telegram.org'), /POST/);
+    assert.match(readOnlyRefusal('GET', 'https://evil.example/?leak=1', 'web.telegram.org'), /evil\.example/, 'no other site: a query could carry the page away');
+    assert.match(readOnlyRefusal('GET', 'https://web.telegram.org.evil.example/', 'web.telegram.org'), /evil/);
+    assert.match(readOnlyRefusal('GET', 'not a url', 'web.telegram.org'), /адрес/);
+});
+
+test('a script is the body of an async function with its arguments', () => {
+    assert.equal(scriptExpression('return args.n + 1;', { n: 41 }), '(async (args) => {\nreturn args.n + 1;\n})({"n":41})');
+    assert.equal(scriptExpression('return 1', null), '(async (args) => {\nreturn 1\n})({})');
 });

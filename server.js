@@ -5,7 +5,7 @@
 import Fastify from 'fastify';
 import puppeteer from 'puppeteer-core';
 import { timingSafeEqual } from 'node:crypto';
-import { refusal } from './guard.js';
+import { readOnlyRefusal, refusal, scriptExpression } from './guard.js';
 
 const TOKEN = process.env.BROWSER_TOKEN ?? '';
 const PROFILES_DIR = process.env.PROFILES_DIR ?? '/profiles';
@@ -13,6 +13,9 @@ const IDLE_MS = 10 * 60 * 1000;
 const NAV_TIMEOUT_MS = 30_000;
 const TEXT_MAX = 60_000;
 const PROFILE = /^[a-z0-9][a-z0-9_-]{0,31}$/;
+const SCRIPT_MAX = 200_000;
+const RESULT_MAX = 60_000;
+const SCRIPT_TIMEOUT_MS = 30_000;
 
 if (TOKEN.length < 16) {
     console.error('BROWSER_TOKEN must be at least 16 characters');
@@ -169,6 +172,96 @@ app.post('/type', async (request, reply) => {
         await settle(page);
     }
     return snapshot(page);
+});
+
+/**
+ * A read-only script runs on a frozen copy of the page in a tab of its own: the current DOM, the page's own scripts
+ * off, only GET to the same host, no WebSocket. It cannot touch the live page or its connections, so it cannot send
+ * anything; closing the copy ends whatever it left running.
+ * spec: BRIEF.md#скрипты-браузера-решение-владельца-2026-11-17
+ */
+async function frozenCopy(s, host) {
+    const html = await s.page.content();
+    const url = s.page.url();
+    const copy = await s.browser.newPage();
+    try {
+        await copy.setViewport({ width: 1280, height: 900 });
+        await copy.setJavaScriptEnabled(false);
+        await copy.setRequestInterception(true);
+        let served = false;
+        copy.on('request', async (request) => {
+            // the address of the request has no #fragment, the page's may have one (web.telegram.org/k/#@chat)
+            if (!served && request.isNavigationRequest() && request.url().split('#')[0] === url.split('#')[0]) {
+                served = true;
+                request.respond({ status: 200, contentType: 'text/html; charset=utf-8', body: html });
+                return;
+            }
+            const reason = readOnlyRefusal(request.method(), request.url(), host) ?? await refusal(request.url(), undefined, s.allowed);
+            if (reason === null) {
+                request.continue();
+            } else {
+                request.abort('accessdenied');
+            }
+        });
+        const cdp = await copy.createCDPSession();
+        await cdp.send('Network.enable');
+        await cdp.send('Network.setBlockedURLs', { urls: ['ws://*', 'wss://*'] });
+        await copy.goto(url, { waitUntil: 'domcontentloaded', timeout: NAV_TIMEOUT_MS });
+        return copy;
+    } catch (e) {
+        await copy.close().catch(() => {});
+        throw e;
+    }
+}
+
+app.post('/evaluate', async (request, reply) => {
+    const { profile = 'main', source = '', args = {}, mode = 'read', host = '' } = request.body ?? {};
+    if (typeof source !== 'string' || source.trim() === '' || source.length > SCRIPT_MAX) {
+        return reply.code(400).send({ error: `скрипт пуст или длиннее ${SCRIPT_MAX} символов` });
+    }
+    if (mode !== 'read' && mode !== 'act') {
+        return reply.code(400).send({ error: 'mode — read или act' });
+    }
+    const s = await session(profile);
+    let current = '';
+    try {
+        current = new URL(s.page.url()).hostname.toLowerCase();
+    } catch {
+        // an empty tab
+    }
+    if (current === '' || current !== String(host).toLowerCase()) {
+        return reply.code(409).send({ error: `страница открыта на ${current || 'пустой вкладке'}, а скрипт — для ${host}: сначала open` });
+    }
+    if (s.busy) {
+        return reply.code(409).send({ error: 'в этом профиле уже работает скрипт' });
+    }
+    s.busy = true;
+    let page = s.page;
+    let timer;
+    try {
+        if (mode === 'read') {
+            page = await frozenCopy(s, current);
+        }
+        const result = await Promise.race([
+            page.evaluate(scriptExpression(source, args)),
+            new Promise((_, reject) => {
+                timer = setTimeout(() => reject(new Error(`скрипт работал дольше ${SCRIPT_TIMEOUT_MS / 1000} с`)), SCRIPT_TIMEOUT_MS);
+            }),
+        ]);
+        if (mode === 'act') {
+            await settle(page);
+        }
+        const text = JSON.stringify(result ?? null) ?? 'null';
+        return { url: s.page.url(), result: text.slice(0, RESULT_MAX), truncated: text.length > RESULT_MAX };
+    } catch (e) {
+        return reply.code(422).send({ error: `скрипт не выполнен: ${String(e?.message ?? e).slice(0, 500)}` });
+    } finally {
+        clearTimeout(timer);
+        if (page !== s.page) {
+            await page.close().catch(() => {});
+        }
+        s.busy = false;
+    }
 });
 
 app.post('/screenshot', async (request) => {
