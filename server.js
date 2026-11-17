@@ -176,8 +176,9 @@ app.post('/type', async (request, reply) => {
 
 /**
  * A read-only script runs on a frozen copy of the page in a tab of its own: the current DOM, the page's own scripts
- * off, only GET to the same host, no WebSocket. It cannot touch the live page or its connections, so it cannot send
- * anything; closing the copy ends whatever it left running.
+ * off; while the copy loads, only GET to the same host, and before the script the tab goes offline — no fetch, no
+ * WebSocket (blocked URL lists of CDP do not stop a WebSocket in Chromium 156, offline does). It cannot touch the live
+ * page or its connections, so it cannot send anything; closing the copy ends whatever it left running.
  * spec: BRIEF.md#скрипты-браузера-решение-владельца-2026-11-17
  */
 async function frozenCopy(s, host) {
@@ -203,10 +204,10 @@ async function frozenCopy(s, host) {
                 request.abort('accessdenied');
             }
         });
+        await copy.goto(url, { waitUntil: 'domcontentloaded', timeout: NAV_TIMEOUT_MS });
         const cdp = await copy.createCDPSession();
         await cdp.send('Network.enable');
-        await cdp.send('Network.setBlockedURLs', { urls: ['ws://*', 'wss://*'] });
-        await copy.goto(url, { waitUntil: 'domcontentloaded', timeout: NAV_TIMEOUT_MS });
+        await cdp.send('Network.emulateNetworkConditions', { offline: true, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
         return copy;
     } catch (e) {
         await copy.close().catch(() => {});
