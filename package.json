@@ -1,0 +1,16 @@
+{
+    "name": "mercurius-browser",
+    "private": true,
+    "description": "The browser of the Mercurius agent: Chromium under puppeteer-core behind a small Fastify API",
+    "license": "MIT",
+    "type": "module",
+    "main": "server.js",
+    "scripts": {
+        "start": "node server.js",
+        "test": "node --test test/guard.test.js"
+    },
+    "dependencies": {
+        "fastify": "4.28.1",
+        "puppeteer-core": "23.11.1"
+    }
+}
