@@ -34,15 +34,17 @@ async function session(profile) {
         const page = (await browser.pages())[0] ?? (await browser.newPage());
         await page.setViewport({ width: 1280, height: 900 });
         await page.setRequestInterception(true);
+        // hosts the owner allowed for the current page; every navigation sets them anew
+        const allowed = new Set();
         page.on('request', async (request) => {
-            const reason = await refusal(request.url());
+            const reason = await refusal(request.url(), undefined, allowed);
             if (reason === null) {
                 request.continue();
             } else {
                 request.abort('accessdenied');
             }
         });
-        s = { browser, page, timer: null };
+        s = { browser, page, timer: null, allowed };
         sessions.set(profile, s);
     }
     if (s.timer) {
@@ -116,12 +118,17 @@ app.addHook('preHandler', async (request, reply) => {
 app.get('/health', async () => ({ ok: true, sessions: sessions.size }));
 
 app.post('/navigate', async (request, reply) => {
-    const { url, profile = 'main' } = request.body ?? {};
-    const reason = await refusal(String(url ?? ''));
+    const { url, profile = 'main', allow = [] } = request.body ?? {};
+    const hosts = Array.isArray(allow)
+        ? allow.filter((h) => typeof h === 'string' && h.length > 0 && h.length <= 253).slice(0, 4).map((h) => h.toLowerCase())
+        : [];
+    const reason = await refusal(String(url ?? ''), undefined, new Set(hosts));
     if (reason !== null) {
         return reply.code(403).send({ error: `адрес запрещён: ${reason}` });
     }
-    const { page } = await session(profile);
+    const { page, allowed } = await session(profile);
+    allowed.clear();
+    hosts.forEach((h) => allowed.add(h));
     try {
         await page.goto(url, { waitUntil: 'domcontentloaded', timeout: NAV_TIMEOUT_MS });
     } catch (e) {

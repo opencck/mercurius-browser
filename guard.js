@@ -34,8 +34,11 @@ export function isBlockedIp(ip) {
     return /^(fc|fd|fe8|fe9|fea|feb|ff)/.test(lower);
 }
 
-/** Null when the URL may be loaded, the reason otherwise. */
-export async function refusal(url, resolve = lookup) {
+/**
+ * Null when the URL may be loaded, the reason otherwise. A host in `allowed` is one the owner let in for this page.
+ * spec: BRIEF.md#подтверждения-и-запреты — internal addresses only with the owner's permission
+ */
+export async function refusal(url, resolve = lookup, allowed = new Set()) {
     let parsed;
     try {
         parsed = new URL(url);
@@ -49,6 +52,9 @@ export async function refusal(url, resolve = lookup) {
         return `схема ${parsed.protocol} запрещена`;
     }
     const host = parsed.hostname.replace(/^\[|\]$/g, '');
+    if (allowed.has(host.toLowerCase())) {
+        return null;
+    }
     if (isIP(host)) {
         return isBlockedIp(host) ? 'внутренний адрес' : null;
     }
