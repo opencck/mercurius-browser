@@ -5,14 +5,14 @@
 import Fastify from 'fastify';
 import puppeteer from 'puppeteer-core';
 import { timingSafeEqual } from 'node:crypto';
-import { readOnlyRefusal, refusal, scriptExpression, typable } from './guard.js';
+import { mkdir, readdir, rename, stat } from 'node:fs/promises';
+import { PROFILE, legacyProfile, readOnlyRefusal, refusal, scriptExpression, typable } from './guard.js';
 
 const TOKEN = process.env.BROWSER_TOKEN ?? '';
 const PROFILES_DIR = process.env.PROFILES_DIR ?? '/profiles';
 const IDLE_MS = 10 * 60 * 1000;
 const NAV_TIMEOUT_MS = 30_000;
 const TEXT_MAX = 60_000;
-const PROFILE = /^[a-z0-9][a-z0-9_-]{0,31}$/;
 const SCRIPT_MAX = 200_000;
 const RESULT_MAX = 60_000;
 const SCRIPT_TIMEOUT_MS = 30_000;
@@ -28,6 +28,7 @@ const sessions = new Map();
 async function session(profile) {
     let s = sessions.get(profile);
     if (!s) {
+        await mkdir(`${PROFILES_DIR}/${profile}`, { recursive: true });
         const browser = await puppeteer.launch({
             executablePath: process.env.CHROMIUM_PATH ?? '/usr/bin/chromium',
             userDataDir: `${PROFILES_DIR}/${profile}`,
@@ -112,8 +113,9 @@ app.addHook('onRequest', async (request, reply) => {
 });
 
 app.addHook('preHandler', async (request, reply) => {
-    const profile = request.body?.profile ?? 'main';
-    if (request.method === 'POST' && !PROFILE.test(profile)) {
+    // every call names its profile as a path of a participant; adopt alone has none
+    const profile = String(request.body?.profile ?? '');
+    if (request.method === 'POST' && request.url !== '/adopt' && !PROFILE.test(profile)) {
         reply.code(400).send({ error: 'bad profile' });
     }
 });
@@ -295,6 +297,33 @@ app.post('/screenshot', async (request) => {
     const { page } = await session(profile);
     const png = await page.screenshot({ type: 'png' });
     return { url: page.url(), png: Buffer.from(png).toString('base64') };
+});
+
+/**
+ * Moves the profiles of the old flat layout (a name at the top of the folder) into the set of the owner: their logins
+ * stay. The agent calls it once at start with the owner's folder; a profile already there is left as it is.
+ * spec: BRIEF.md#решения-по-доработкам-2026-11-18 — profiles of the browser are laid out by participants and projects
+ */
+app.post('/adopt', async (request, reply) => {
+    const { owner = '' } = request.body ?? {};
+    if (!/^p\d{1,10}$/.test(String(owner))) {
+        return reply.code(400).send({ error: 'bad owner' });
+    }
+    const moved = [];
+    await mkdir(`${PROFILES_DIR}/${owner}`, { recursive: true });
+    for (const name of await readdir(PROFILES_DIR)) {
+        if (!legacyProfile(name) || !(await stat(`${PROFILES_DIR}/${name}`)).isDirectory()) {
+            continue;
+        }
+        await close(name);
+        const target = `${PROFILES_DIR}/${owner}/${name}`;
+        if (await stat(target).then(() => true, () => false)) {
+            continue;
+        }
+        await rename(`${PROFILES_DIR}/${name}`, target);
+        moved.push(name);
+    }
+    return { moved };
 });
 
 app.post('/close', async (request) => {

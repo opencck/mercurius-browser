@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { isBlockedIp, readOnlyRefusal, refusal, scriptExpression, typable } from '../guard.js';
+import { PROFILE, isBlockedIp, legacyProfile, readOnlyRefusal, refusal, scriptExpression, typable } from '../guard.js';
 
 test('private, loopback, link-local and metadata addresses are blocked', () => {
     for (const ip of ['10.1.2.3', '127.0.0.1', '169.254.169.254', '172.20.0.5', '192.168.1.1', '100.64.0.1', '0.0.0.0', '::1', 'fd00::1', 'fe80::1', '::ffff:10.0.0.1']) {
@@ -82,4 +82,16 @@ test('typing goes only into text fields, never into what presses something', () 
     ]) {
         assert.equal(typable(element), false, JSON.stringify(element));
     }
+});
+
+test('a profile is a path of a participant, or of a participant in a project, and nothing else', () => {
+    for (const profile of ['p1/main', 'p42/shop-2', 'p5/projects/3/main']) {
+        assert.equal(PROFILE.test(profile), true, profile);
+    }
+    for (const profile of ['main', 'p1', 'p1/../p2/main', 'p1/projects/x/main', '../p1/main', 'p1/main/x', 'p1/Main', 'p1/projects/3', '/p1/main']) {
+        assert.equal(PROFILE.test(profile), false, profile);
+    }
+    assert.equal(legacyProfile('main'), true);
+    assert.equal(legacyProfile('p1'), false, 'a folder of a participant stays');
+    assert.equal(legacyProfile('..'), false);
 });

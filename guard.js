@@ -189,3 +189,15 @@ export function typable(element) {
     }
     return element.editable === true;
 }
+
+/**
+ * A profile is a path inside the profiles folder laid out by participants and projects: `p<id>/<name>` or
+ * `p<id>/projects/<project>/<name>`. Nothing else is taken: the agent computes the path, a name never climbs out.
+ * spec: BRIEF.md#решения-по-доработкам-2026-11-18 — profiles of the browser are laid out by participants and projects
+ */
+export const PROFILE = /^p\d{1,10}(?:\/projects\/\d{1,10})?\/[a-z0-9][a-z0-9_-]{0,31}$/;
+
+/** A folder of the old flat layout (a profile name at the top), which `adopt` moves into the owner's set. */
+export function legacyProfile(name) {
+    return /^[a-z0-9][a-z0-9_-]{0,31}$/.test(name) && !/^p\d{1,10}$/.test(name);
+}

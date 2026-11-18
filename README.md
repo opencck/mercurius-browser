@@ -20,6 +20,7 @@ names a profile whose logins survive restarts (`[a-z0-9][a-z0-9_-]{0,31}`).
 | `POST /evaluate` | runs a script: on a frozen offline copy to read, or on the live page to act |
 | `POST /screenshot` | a PNG of the page |
 | `POST /close` | closes the profile's page |
+| `POST /adopt` | moves profiles of the old flat layout into the owner's set (`{"owner":"p1"}`), logins stay |
 
 Every request of a page is checked against internal and private addresses (`guard.js`), so a page cannot reach the
 host's network. A session closes after 10 minutes without requests.
@@ -30,7 +31,7 @@ host's network. A session closes after 10 minutes without requests.
 |---|---|---|
 | `BROWSER_TOKEN` | — | required, 16+ characters |
 | `PORT` | `3000` | port |
-| `PROFILES_DIR` | `/profiles` | where profiles with logins live |
+| `PROFILES_DIR` | `/profiles` | where profiles with logins live: `p<participant>/<name>`, `p<participant>/projects/<project>/<name>` |
 | `CHROMIUM_PATH` | `/usr/bin/chromium` | the browser |
 
 ## Run
