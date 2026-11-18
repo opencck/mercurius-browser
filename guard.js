@@ -167,3 +167,25 @@ export function readOnlyRefusal(method, url, host) {
 export function scriptExpression(source, args) {
     return `(async (args) => {\n${source}\n})(${JSON.stringify(args ?? {})})`;
 }
+
+/** Input types that take typed text; buttons, checkboxes, files and the like do not. */
+const TEXT_INPUTS = new Set(['', 'text', 'search', 'email', 'url', 'tel', 'password', 'number', 'date', 'datetime-local', 'month', 'time', 'week']);
+
+/**
+ * Whether `type` may write into an element described as {tag, type, editable, disabled, readOnly}: a text input, a
+ * textarea or a contenteditable element — not a button or a link, so typing never presses anything.
+ * spec: BRIEF.md#решения-по-доработкам-2026-11-18 — typing only into fields; sending only by an explicit submit or click
+ */
+export function typable(element) {
+    if (!element || element.disabled || element.readOnly) {
+        return false;
+    }
+    const tag = String(element.tag ?? '').toLowerCase();
+    if (tag === 'textarea') {
+        return true;
+    }
+    if (tag === 'input') {
+        return TEXT_INPUTS.has(String(element.type ?? '').toLowerCase());
+    }
+    return element.editable === true;
+}

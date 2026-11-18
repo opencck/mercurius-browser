@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { isBlockedIp, readOnlyRefusal, refusal, scriptExpression } from '../guard.js';
+import { isBlockedIp, readOnlyRefusal, refusal, scriptExpression, typable } from '../guard.js';
 
 test('private, loopback, link-local and metadata addresses are blocked', () => {
     for (const ip of ['10.1.2.3', '127.0.0.1', '169.254.169.254', '172.20.0.5', '192.168.1.1', '100.64.0.1', '0.0.0.0', '::1', 'fd00::1', 'fe80::1', '::ffff:10.0.0.1']) {
@@ -67,4 +67,19 @@ test('a read-only script reads its own site with GET and sends nothing', () => {
 test('a script is the body of an async function with its arguments', () => {
     assert.equal(scriptExpression('return args.n + 1;', { n: 41 }), '(async (args) => {\nreturn args.n + 1;\n})({"n":41})');
     assert.equal(scriptExpression('return 1', null), '(async (args) => {\nreturn 1\n})({})');
+});
+
+test('typing goes only into text fields, never into what presses something', () => {
+    for (const element of [
+        { tag: 'INPUT', type: 'text' }, { tag: 'input', type: '' }, { tag: 'input', type: 'password' },
+        { tag: 'TEXTAREA' }, { tag: 'div', editable: true },
+    ]) {
+        assert.equal(typable(element), true, JSON.stringify(element));
+    }
+    for (const element of [
+        { tag: 'BUTTON' }, { tag: 'input', type: 'submit' }, { tag: 'input', type: 'checkbox' }, { tag: 'input', type: 'file' },
+        { tag: 'a' }, { tag: 'div' }, { tag: 'input', type: 'text', disabled: true }, { tag: 'textarea', readOnly: true }, null,
+    ]) {
+        assert.equal(typable(element), false, JSON.stringify(element));
+    }
 });

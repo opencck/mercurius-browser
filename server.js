@@ -5,7 +5,7 @@
 import Fastify from 'fastify';
 import puppeteer from 'puppeteer-core';
 import { timingSafeEqual } from 'node:crypto';
-import { readOnlyRefusal, refusal, scriptExpression } from './guard.js';
+import { readOnlyRefusal, refusal, scriptExpression, typable } from './guard.js';
 
 const TOKEN = process.env.BROWSER_TOKEN ?? '';
 const PROFILES_DIR = process.env.PROFILES_DIR ?? '/profiles';
@@ -165,8 +165,32 @@ app.post('/type', async (request, reply) => {
     if (!element) {
         return reply.code(404).send({ error: 'элемента с таким номером нет — сначала прочитай страницу' });
     }
-    await element.click({ clickCount: 3 });
-    await element.type(String(text), { delay: 15 });
+    // spec: BRIEF.md#решения-по-доработкам-2026-11-18 — typing only into fields, focused without a mouse click; the
+    // text goes in as text (a line break is a line break, never the Enter key), sending only by an explicit submit
+    const kind = await element.evaluate((el) => ({
+        tag: el.tagName, type: el.getAttribute('type') ?? '', editable: el.isContentEditable === true,
+        disabled: el.disabled === true, readOnly: el.readOnly === true,
+    }));
+    if (!typable(kind)) {
+        return reply.code(400).send({ error: 'вводить текст можно только в поле ввода; кнопку нажимают действием click' });
+    }
+    await element.evaluate((el) => {
+        el.focus();
+        if (typeof el.select === 'function') {
+            el.select();
+        } else {
+            const range = document.createRange();
+            range.selectNodeContents(el);
+            const selection = window.getSelection();
+            selection.removeAllRanges();
+            selection.addRange(range);
+        }
+    });
+    if (String(text) === '') {
+        await page.keyboard.press('Delete');
+    } else {
+        await page.keyboard.sendCharacter(String(text));
+    }
     if (submit) {
         await element.press('Enter');
         await settle(page);

@@ -16,7 +16,7 @@ names a profile whose logins survive restarts (`[a-z0-9][a-z0-9_-]{0,31}`).
 | `GET /health` | `{"ok": true, "sessions": N}` |
 | `POST /navigate` | opens a URL |
 | `POST /read` | the text of the page and its links and fields |
-| `POST /click`, `POST /type` | acts on an element |
+| `POST /click`, `POST /type` | acts on an element; `type` writes only into a text field, line breaks go in as text and only `submit` sends |
 | `POST /evaluate` | runs a script: on a frozen offline copy to read, or on the live page to act |
 | `POST /screenshot` | a PNG of the page |
 | `POST /close` | closes the profile's page |
