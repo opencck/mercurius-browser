@@ -15,6 +15,69 @@ function v4ToInt(ip) {
     return ip.split('.').reduce((acc, part) => (acc << 8) + Number(part), 0) >>> 0;
 }
 
+/** IPv6 networks never loaded: unspecified and loopback, discard, benchmarking, ORCHID, documentation, ULA, link- and site-local, multicast. */
+const V6_BLOCKED = [
+    ['::', 8], ['100::', 64], ['2001:2::', 48], ['2001:20::', 28], ['2001:db8::', 32], ['fc00::', 7], ['fe80::', 10],
+    ['fec0::', 10], ['ff00::', 8],
+];
+/** IPv4 carried inside IPv6: [network, prefix bits, offset of the four IPv4 bytes]. */
+const V6_WRAPS_V4 = [
+    ['::ffff:0:0', 96, 12], // mapped
+    ['::ffff:0:0:0', 96, 12], // translated
+    ['64:ff9b::', 96, 12], // NAT64
+    ['64:ff9b:1::', 48, 12], // local NAT64
+    ['2002::', 16, 2], // 6to4
+];
+
+/**
+ * The 16 bytes of an IPv6 address in any spelling (compressed, with a dotted IPv4 tail, with a zone); null — not one.
+ * The spelling matters: new URL() turns [::ffff:169.254.169.254] into [::ffff:a9fe:a9fe], so a check of the text misses it.
+ */
+function v6Bytes(ip) {
+    let text = ip.toLowerCase().split('%')[0];
+    const dotted = text.match(/^(.*:)(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+    if (dotted) {
+        const parts = dotted.slice(2).map(Number);
+        if (parts.some((part) => part > 255)) {
+            return null;
+        }
+        text = dotted[1] + ((parts[0] << 8) | parts[1]).toString(16) + ':' + ((parts[2] << 8) | parts[3]).toString(16);
+    }
+    const halves = text.split('::');
+    if (halves.length > 2) {
+        return null;
+    }
+    const head = halves[0] === '' ? [] : halves[0].split(':');
+    const tail = halves.length === 2 && halves[1] !== '' ? halves[1].split(':') : [];
+    const missing = 8 - head.length - tail.length;
+    if (halves.length === 1 ? missing !== 0 : missing < 1) {
+        return null;
+    }
+    const groups = [...head, ...Array(halves.length === 2 ? missing : 0).fill('0'), ...tail];
+    const bytes = [];
+    for (const group of groups) {
+        if (!/^[0-9a-f]{1,4}$/.test(group)) {
+            return null;
+        }
+        const value = parseInt(group, 16);
+        bytes.push(value >> 8, value & 255);
+    }
+    return bytes;
+}
+
+function inNetwork(bytes, base, bits) {
+    const network = v6Bytes(base);
+    for (let bit = 0; bit < bits; bit += 8) {
+        const mask = bits - bit >= 8 ? 255 : (255 << (8 - (bits - bit))) & 255;
+        if ((bytes[bit >> 3] & mask) !== (network[bit >> 3] & mask)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// ref: src/App/Agent/Tool/AddressGuard.php (the guard of the application) — the same networks and the same IPv4 wrappers,
+//      so the browser refuses what http_request and web_read refuse
 export function isBlockedIp(ip) {
     if (isIP(ip) === 4) {
         const value = v4ToInt(ip);
@@ -23,15 +86,18 @@ export function isBlockedIp(ip) {
             return (value & mask) === (v4ToInt(base) & mask);
         });
     }
-    const lower = ip.toLowerCase();
-    if (lower === '::' || lower === '::1') {
+    const bytes = v6Bytes(ip);
+    if (bytes === null) {
+        // not an address this check understands: never loaded
         return true;
     }
-    const mapped = lower.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
-    if (mapped) {
-        return isBlockedIp(mapped[1]);
+    // a wrapped IPv4 address is judged as that IPv4 address
+    for (const [base, bits, offset] of V6_WRAPS_V4) {
+        if (inNetwork(bytes, base, bits)) {
+            return isBlockedIp(bytes.slice(offset, offset + 4).join('.'));
+        }
     }
-    return /^(fc|fd|fe8|fe9|fea|feb|ff)/.test(lower);
+    return V6_BLOCKED.some(([base, bits]) => inNetwork(bytes, base, bits));
 }
 
 /**

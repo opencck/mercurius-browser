@@ -11,6 +11,26 @@ test('private, loopback, link-local and metadata addresses are blocked', () => {
     }
 });
 
+test('an internal IPv4 address inside an IPv6 wrapper is blocked, in any spelling', async () => {
+    // new URL() rewrites [::ffff:169.254.169.254] as [::ffff:a9fe:a9fe]: the dotted form never reaches the check
+    const inside = [
+        '::ffff:a9fe:a9fe', '::ffff:7f00:1', '::ffff:0:a9fe:a9fe', '64:ff9b::a9fe:a9fe', '64:ff9b::10.0.0.1',
+        '2002:a9fe:a9fe::1', '::a9fe:a9fe', '0:0:0:0:0:ffff:127.0.0.1', 'fec0::1', '2001:db8::1', '100::1', '::',
+    ];
+    for (const ip of inside) {
+        assert.equal(isBlockedIp(ip), true, ip);
+    }
+    for (const ip of ['::ffff:5db8:d822', '64:ff9b::5db8:d822', '2a00:1450:4010:c0b::8a']) {
+        assert.equal(isBlockedIp(ip), false, ip);
+    }
+    const resolve = async () => [{ address: '93.184.216.34' }];
+    for (const url of ['http://[::ffff:169.254.169.254]/', 'http://[::ffff:127.0.0.1]/', 'http://[64:ff9b::a9fe:a9fe]/', 'http://[fec0::1]/']) {
+        assert.match(await refusal(url, resolve), /внутренний/, url);
+    }
+    // a name that resolves to a wrapped internal address
+    assert.match(await refusal('https://wrapped.example/', async () => [{ address: '::ffff:a00:5' }]), /внутренний/);
+});
+
 test('urls are judged by scheme, name and every resolved address', async () => {
     const resolve = async (host) => host === 'rebind.example'
         ? [{ address: '93.184.216.34' }, { address: '10.0.0.5' }]
