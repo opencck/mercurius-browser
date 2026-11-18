@@ -7,6 +7,7 @@ import puppeteer from 'puppeteer-core';
 import { timingSafeEqual } from 'node:crypto';
 import { mkdir, readdir, rename, stat } from 'node:fs/promises';
 import { PROFILE, legacyProfile, readOnlyRefusal, refusal, scriptExpression, typable } from './guard.js';
+import { startProxy } from './proxy.js';
 
 const TOKEN = process.env.BROWSER_TOKEN ?? '';
 const PROFILES_DIR = process.env.PROFILES_DIR ?? '/profiles';
@@ -29,26 +30,44 @@ async function session(profile) {
     let s = sessions.get(profile);
     if (!s) {
         await mkdir(`${PROFILES_DIR}/${profile}`, { recursive: true });
+        // hosts the owner allowed for the current page; every navigation sets them anew
+        const allowed = new Set();
+        // spec: BRIEF.md#решения-по-доработкам-2026-11-18 — every connection of the browser goes through a proxy that
+        //       dials the address it checked; the loopback is not bypassed
+        const proxy = await startProxy({ allowed: () => allowed });
         const browser = await puppeteer.launch({
             executablePath: process.env.CHROMIUM_PATH ?? '/usr/bin/chromium',
             userDataDir: `${PROFILES_DIR}/${profile}`,
             headless: true,
-            args: ['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu', '--no-first-run', '--lang=ru-RU'],
+            args: ['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu', '--no-first-run', '--lang=ru-RU',
+                `--proxy-server=http://127.0.0.1:${proxy.port}`, '--proxy-bypass-list=<-loopback>'],
+        });
+        const guard = async (tab) => {
+            await tab.setRequestInterception(true);
+            tab.on('request', async (request) => {
+                const reason = await refusal(request.url(), undefined, allowed);
+                if (reason === null) {
+                    request.continue();
+                } else {
+                    request.abort('accessdenied');
+                }
+            });
+        };
+        // a tab the page opens (window.open, a link with target) is checked the same way as the first one; a tab the
+        // service opens itself (the frozen copy) has no opener and its own checks
+        browser.on('targetcreated', async (target) => {
+            if (target.opener() === undefined) {
+                return;
+            }
+            const tab = await target.page().catch(() => null);
+            if (tab !== null) {
+                await guard(tab).catch(() => {});
+            }
         });
         const page = (await browser.pages())[0] ?? (await browser.newPage());
         await page.setViewport({ width: 1280, height: 900 });
-        await page.setRequestInterception(true);
-        // hosts the owner allowed for the current page; every navigation sets them anew
-        const allowed = new Set();
-        page.on('request', async (request) => {
-            const reason = await refusal(request.url(), undefined, allowed);
-            if (reason === null) {
-                request.continue();
-            } else {
-                request.abort('accessdenied');
-            }
-        });
-        s = { browser, page, timer: null, allowed };
+        await guard(page);
+        s = { browser, page, timer: null, allowed, proxy };
         sessions.set(profile, s);
     }
     if (s.timer) {
@@ -63,6 +82,7 @@ async function close(profile) {
     sessions.delete(profile);
     if (s) {
         await s.browser.close().catch(() => {});
+        await s.proxy?.close().catch(() => {});
     }
 }
 

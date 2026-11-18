@@ -7,7 +7,7 @@
     "main": "server.js",
     "scripts": {
         "start": "node server.js",
-        "test": "node --test test/guard.test.js"
+        "test": "node --test test/guard.test.js test/proxy.test.js"
     },
     "dependencies": {
         "fastify": "4.28.1",

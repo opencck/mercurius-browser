@@ -9,7 +9,7 @@ RUN apt-get update \
 WORKDIR /app
 COPY package.json ./
 RUN npm install --omit=dev --no-audit --no-fund && npm cache clean --force
-COPY server.js guard.js ./
+COPY server.js guard.js proxy.js ./
 USER browser
 ENV CHROMIUM_PATH=/usr/bin/chromium PROFILES_DIR=/profiles PORT=3000
 EXPOSE 3000
