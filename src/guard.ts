@@ -5,23 +5,26 @@
 import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
 
-const V4_BLOCKED = [
+/** How an address is resolved: every answer for a name, as node:dns lookup with {all: true} gives them. */
+export type Resolve = (host: string, options: { all: true }) => Promise<Array<{ address: string }>>;
+
+const V4_BLOCKED: ReadonlyArray<readonly [string, number]> = [
     ['0.0.0.0', 8], ['10.0.0.0', 8], ['100.64.0.0', 10], ['127.0.0.0', 8], ['169.254.0.0', 16], ['172.16.0.0', 12],
     ['192.0.0.0', 24], ['192.0.2.0', 24], ['192.168.0.0', 16], ['198.18.0.0', 15], ['198.51.100.0', 24],
     ['203.0.113.0', 24], ['224.0.0.0', 4], ['240.0.0.0', 4],
 ];
 
-function v4ToInt(ip) {
+function v4ToInt(ip: string): number {
     return ip.split('.').reduce((acc, part) => (acc << 8) + Number(part), 0) >>> 0;
 }
 
 /** IPv6 networks never loaded: unspecified and loopback, discard, benchmarking, ORCHID, documentation, ULA, link- and site-local, multicast. */
-const V6_BLOCKED = [
+const V6_BLOCKED: ReadonlyArray<readonly [string, number]> = [
     ['::', 8], ['100::', 64], ['2001:2::', 48], ['2001:20::', 28], ['2001:db8::', 32], ['fc00::', 7], ['fe80::', 10],
     ['fec0::', 10], ['ff00::', 8],
 ];
 /** IPv4 carried inside IPv6: [network, prefix bits, offset of the four IPv4 bytes]. */
-const V6_WRAPS_V4 = [
+const V6_WRAPS_V4: ReadonlyArray<readonly [string, number, number]> = [
     ['::ffff:0:0', 96, 12], // mapped
     ['::ffff:0:0:0', 96, 12], // translated
     ['64:ff9b::', 96, 12], // NAT64
@@ -33,7 +36,7 @@ const V6_WRAPS_V4 = [
  * The 16 bytes of an IPv6 address in any spelling (compressed, with a dotted IPv4 tail, with a zone); null — not one.
  * The spelling matters: new URL() turns [::ffff:169.254.169.254] into [::ffff:a9fe:a9fe], so a check of the text misses it.
  */
-function v6Bytes(ip) {
+function v6Bytes(ip: string): number[] | null {
     let text = ip.toLowerCase().split('%')[0];
     const dotted = text.match(/^(.*:)(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
     if (dotted) {
@@ -53,8 +56,8 @@ function v6Bytes(ip) {
     if (halves.length === 1 ? missing !== 0 : missing < 1) {
         return null;
     }
-    const groups = [...head, ...Array(halves.length === 2 ? missing : 0).fill('0'), ...tail];
-    const bytes = [];
+    const groups = [...head, ...Array<string>(halves.length === 2 ? missing : 0).fill('0'), ...tail];
+    const bytes: number[] = [];
     for (const group of groups) {
         if (!/^[0-9a-f]{1,4}$/.test(group)) {
             return null;
@@ -65,8 +68,8 @@ function v6Bytes(ip) {
     return bytes;
 }
 
-function inNetwork(bytes, base, bits) {
-    const network = v6Bytes(base);
+function inNetwork(bytes: number[], base: string, bits: number): boolean {
+    const network = v6Bytes(base)!;
     for (let bit = 0; bit < bits; bit += 8) {
         const mask = bits - bit >= 8 ? 255 : (255 << (8 - (bits - bit))) & 255;
         if ((bytes[bit >> 3] & mask) !== (network[bit >> 3] & mask)) {
@@ -78,7 +81,7 @@ function inNetwork(bytes, base, bits) {
 
 // ref: src/App/Agent/Tool/AddressGuard.php (the guard of the application) — the same networks and the same IPv4 wrappers,
 //      so the browser refuses what http_request and web_read refuse
-export function isBlockedIp(ip) {
+export function isBlockedIp(ip: string): boolean {
     if (isIP(ip) === 4) {
         const value = v4ToInt(ip);
         return V4_BLOCKED.some(([base, bits]) => {
@@ -104,8 +107,8 @@ export function isBlockedIp(ip) {
  * Null when the URL may be loaded, the reason otherwise. A host in `allowed` is one the owner let in for this page.
  * spec: BRIEF.md#подтверждения-и-запреты — internal addresses only with the owner's permission
  */
-export async function refusal(url, resolve = lookup, allowed = new Set()) {
-    let parsed;
+export async function refusal(url: string, resolve: Resolve = lookup, allowed: Set<string> = new Set()): Promise<string | null> {
+    let parsed: URL;
     try {
         parsed = new URL(url);
     } catch {
@@ -127,7 +130,7 @@ export async function refusal(url, resolve = lookup, allowed = new Set()) {
     if (!host.includes('.')) {
         return 'внутреннее имя';
     }
-    let addresses;
+    let addresses: Array<{ address: string }>;
     try {
         addresses = await resolve(host, { all: true });
     } catch {
@@ -144,8 +147,8 @@ export async function refusal(url, resolve = lookup, allowed = new Set()) {
  * a read changes nothing on the site, and nothing read can leave for another site, not even in a query string.
  * spec: BRIEF.md#скрипты-браузера-решение-владельца-2026-11-17
  */
-export function readOnlyRefusal(method, url, host) {
-    let parsed;
+export function readOnlyRefusal(method: string, url: string, host: string): string | null {
+    let parsed: URL;
     try {
         parsed = new URL(url);
     } catch {
@@ -164,19 +167,28 @@ export function readOnlyRefusal(method, url, host) {
 }
 
 /** The script file is the body of an async function: it gets args and returns what is given back. */
-export function scriptExpression(source, args) {
+export function scriptExpression(source: string, args: unknown): string {
     return `(async (args) => {\n${source}\n})(${JSON.stringify(args ?? {})})`;
 }
 
 /** Input types that take typed text; buttons, checkboxes, files and the like do not. */
-const TEXT_INPUTS = new Set(['', 'text', 'search', 'email', 'url', 'tel', 'password', 'number', 'date', 'datetime-local', 'month', 'time', 'week']);
+const TEXT_INPUTS = new Set<string>(['', 'text', 'search', 'email', 'url', 'tel', 'password', 'number', 'date', 'datetime-local', 'month', 'time', 'week']);
+
+/** An element as the page describes it for `typable`. */
+export interface TypableElement {
+    tag?: string;
+    type?: string;
+    editable?: boolean;
+    disabled?: boolean;
+    readOnly?: boolean;
+}
 
 /**
  * Whether `type` may write into an element described as {tag, type, editable, disabled, readOnly}: a text input, a
  * textarea or a contenteditable element — not a button or a link, so typing never presses anything.
  * spec: BRIEF.md#решения-по-доработкам-2026-11-18 — typing only into fields; sending only by an explicit submit or click
  */
-export function typable(element) {
+export function typable(element: TypableElement | null | undefined): boolean {
     if (!element || element.disabled || element.readOnly) {
         return false;
     }
@@ -198,7 +210,7 @@ export function typable(element) {
 export const PROFILE = /^p\d{1,10}(?:\/projects\/\d{1,10})?\/[a-z0-9][a-z0-9_-]{0,31}$/;
 
 /** A folder of the old flat layout (a profile name at the top), which `adopt` moves into the owner's set. */
-export function legacyProfile(name) {
+export function legacyProfile(name: string): boolean {
     return /^[a-z0-9][a-z0-9_-]{0,31}$/.test(name) && !/^p\d{1,10}$/.test(name);
 }
 
@@ -207,7 +219,7 @@ export function legacyProfile(name) {
  * text only one option has. Null — no such option, or the part is not enough to tell.
  * spec: BRIEF.md#интернет-и-браузер — the agent picks a value in a list
  */
-export function optionFor(options, wanted) {
+export function optionFor(options: Array<{ value: string; text: string }>, wanted: unknown): string | null {
     const want = String(wanted).trim().toLowerCase();
     if (want === '') {
         return null;
@@ -224,8 +236,11 @@ export function optionFor(options, wanted) {
     return parts.length === 1 ? parts[0].value : null;
 }
 
+/** A scroll by a number of pixels, or to an end of the page. */
+export type ScrollTarget = { by: number; to?: undefined } | { to: 'top'; by?: undefined } | { to: 'bottom'; by?: undefined };
+
 /** Where a scroll goes: most of a screen down or up, or to an end; null for a direction there is not. */
-export function scrollTarget(direction, height) {
+export function scrollTarget(direction: string, height: number): ScrollTarget | null {
     switch (direction) {
         case 'down':
             return { by: Math.round(height * 0.8) };
@@ -246,6 +261,6 @@ export function scrollTarget(direction, height) {
  *      _admit_dialog) — the auto_dismiss policy with the closed dialog kept for the agent; hermes waits for the agent by
  *      default (must_respond), here the dismissal is the only policy
  */
-export function dialogLine(type, message) {
+export function dialogLine(type: string, message: unknown): string {
     return `${type}: ${String(message).replace(/\s+/g, ' ').trim().slice(0, 500)}`;
 }

@@ -27,8 +27,8 @@ names a profile whose logins survive restarts (`[a-z0-9][a-z0-9_-]{0,31}`).
 
 A dialog of the page (`alert`, `confirm`, `prompt`, `beforeunload`) is dismissed at once and its text comes with the next answer (`dialogs`): an open dialog would hold the page. A tab the page opens becomes the current one.
 
-Every request of a page is checked against internal and private addresses (`guard.js`), so a page cannot reach the
-host's network. A session closes after 10 minutes without requests.
+Every request of a page is checked against internal and private addresses (`src/guard.ts`) and goes out through a
+loopback proxy that dials the checked address (`src/proxy.ts`), so a page cannot reach the host's network. A session closes after 10 minutes without requests.
 
 ## Settings
 
@@ -51,10 +51,19 @@ In Mercurius the service is in the compose profile `browser`: add it to `COMPOSE
 
 ## Development
 
+The service is written in TypeScript (Node.js 22): the sources are in `src/` (`server.ts` — the API, `guard.ts` — the
+address checks and helpers, `proxy.ts` — the loopback proxy), the tests in `test/`. `tsc` compiles both into `dist/`;
+the Docker image builds them in a separate stage and runs `dist/src/server.js`.
+
 ```sh
 npm install
-npm test
+npm run build    # compile into dist/
+npm start        # run dist/src/server.js
+npm run check    # TypeScript type check, ESLint and the tests
 ```
+
+The tests need no browser and no network (the proxy tests open sockets on the loopback). CI runs `npm ci` and
+`npm run check`.
 
 ## License
 

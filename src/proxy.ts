@@ -8,10 +8,20 @@
 import { createServer, request as httpRequest } from 'node:http';
 import { connect } from 'node:net';
 import { isIP } from 'node:net';
+import type { AddressInfo } from 'node:net';
 import { lookup } from 'node:dns/promises';
 import { isBlockedIp } from './guard.js';
 
 const CONNECT_TIMEOUT_MS = 15_000;
+
+/** How the proxy resolves a name: every answer, as node:dns lookup with {all: true} gives them. */
+export type Resolve = (host: string, options: { all: true }) => Promise<Array<{ address: string; family: number }>>;
+
+/** The proxy on the loopback: its port and how to stop it. */
+export interface Proxy {
+    port: number;
+    close: () => Promise<void>;
+}
 
 /**
  * The address to dial for a host, or the reason it is refused. A host the owner allowed may be internal; any other
@@ -22,7 +32,7 @@ const CONNECT_TIMEOUT_MS = 15_000;
  * @param {Set<string>} allowed
  * @returns {Promise<{address: string}|{refused: string}>}
  */
-export async function pick(host, resolve, allowed) {
+export async function pick(host: string, resolve: Resolve, allowed: Set<string>): Promise<{ address: string } | { refused: string }> {
     const name = host.replace(/^\[|\]$/g, '').toLowerCase();
     const permitted = allowed.has(name);
     if (isIP(name)) {
@@ -31,7 +41,7 @@ export async function pick(host, resolve, allowed) {
     if (!name.includes('.') && !permitted) {
         return { refused: 'internal name' };
     }
-    let addresses;
+    let addresses: Array<{ address: string; family: number }>;
     try {
         addresses = await resolve(name, { all: true });
     } catch {
@@ -52,10 +62,10 @@ export async function pick(host, resolve, allowed) {
  * @param {{resolve?: Function, allowed: () => Set<string>}} options allowed — the hosts the owner let in for the page now
  * @returns {Promise<{port: number, close: () => Promise<void>}>}
  */
-export async function startProxy({ resolve = lookup, allowed }) {
+export async function startProxy({ resolve = lookup, allowed }: { resolve?: Resolve; allowed: () => Set<string> }): Promise<Proxy> {
     const server = createServer(async (req, res) => {
         // plain http: the request names the whole address
-        let url;
+        let url: URL;
         try {
             url = new URL(req.url ?? '');
         } catch {
@@ -122,10 +132,10 @@ export async function startProxy({ resolve = lookup, allowed }) {
     // an upgrade over plain http (ws://) is not proxied: a page gets wss through a tunnel
     server.on('upgrade', (req, socket) => socket.end('HTTP/1.1 403 Forbidden\r\n\r\n'));
 
-    await new Promise((done) => server.listen(0, '127.0.0.1', done));
+    await new Promise<void>((done) => server.listen(0, '127.0.0.1', done));
     return {
-        port: server.address().port,
-        close: () => new Promise((done) => {
+        port: (server.address() as AddressInfo).port,
+        close: () => new Promise<void>((done) => {
             server.closeAllConnections?.();
             server.close(() => done());
         }),

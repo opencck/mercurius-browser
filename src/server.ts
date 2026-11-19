@@ -4,10 +4,13 @@
 
 import Fastify from 'fastify';
 import puppeteer from 'puppeteer-core';
+import type { Browser, Page } from 'puppeteer-core';
 import { timingSafeEqual } from 'node:crypto';
 import { mkdir, readdir, rename, stat } from 'node:fs/promises';
 import { PROFILE, dialogLine, legacyProfile, optionFor, readOnlyRefusal, refusal, scriptExpression, scrollTarget, typable } from './guard.js';
+import type { ScrollTarget } from './guard.js';
 import { startProxy } from './proxy.js';
+import type { Proxy } from './proxy.js';
 
 const TOKEN = process.env.BROWSER_TOKEN ?? '';
 const PROFILES_DIR = process.env.PROFILES_DIR ?? '/profiles';
@@ -24,14 +27,25 @@ if (TOKEN.length < 16) {
 }
 
 /** @type {Map<string, {browser: import('puppeteer-core').Browser, page: import('puppeteer-core').Page, timer: NodeJS.Timeout|null}>} */
-const sessions = new Map();
+const sessions = new Map<string, Session>();
 
-async function session(profile) {
+/** A profile's browser, its current page and what the service keeps about it. */
+interface Session {
+    browser: Browser;
+    page: Page;
+    timer: ReturnType<typeof setTimeout> | null;
+    allowed: Set<string>;
+    proxy: Proxy;
+    dialogs: string[];
+    busy?: boolean;
+}
+
+async function session(profile: string): Promise<Session> {
     let s = sessions.get(profile);
     if (!s) {
         await mkdir(`${PROFILES_DIR}/${profile}`, { recursive: true });
         // hosts the owner allowed for the current page; every navigation sets them anew
-        const allowed = new Set();
+        const allowed = new Set<string>();
         // spec: BRIEF.md#решения-по-доработкам-2026-11-18 — every connection of the browser goes through a proxy that
         //       dials the address it checked; the loopback is not bypassed
         const proxy = await startProxy({ allowed: () => allowed });
@@ -43,8 +57,8 @@ async function session(profile) {
                 `--proxy-server=http://127.0.0.1:${proxy.port}`, '--proxy-bypass-list=<-loopback>'],
         });
         // dialogs the pages opened since the last answer, already dismissed; the next snapshot tells the agent
-        const dialogs = [];
-        const guard = async (tab) => {
+        const dialogs: string[] = [];
+        const guard = async (tab: Page) => {
             tab.on('dialog', async (dialog) => {
                 dialogs.push(dialogLine(dialog.type(), dialog.message()));
                 if (dialogs.length > 20) {
@@ -56,9 +70,9 @@ async function session(profile) {
             tab.on('request', async (request) => {
                 const reason = await refusal(request.url(), undefined, allowed);
                 if (reason === null) {
-                    request.continue();
+                    void request.continue();
                 } else {
-                    request.abort('accessdenied');
+                    void request.abort('accessdenied');
                 }
             });
         };
@@ -96,7 +110,7 @@ async function session(profile) {
     return s;
 }
 
-async function close(profile) {
+async function close(profile: string): Promise<void> {
     const s = sessions.get(profile);
     sessions.delete(profile);
     if (s) {
@@ -105,18 +119,35 @@ async function close(profile) {
     }
 }
 
+/** What the agent gets back about a page. */
+interface Snapshot {
+    url: string;
+    title: string;
+    text: string;
+    elements: string[];
+    dialogs: string[];
+}
+
+/** An element the snapshot lists: a link, a button, a field or a list; each reads what it has of these. */
+type ShownElement = HTMLElement & { value?: string; type?: string; href?: string };
+
+/** The parts of a call the routes read: a JSON body from the network, every field unknown until checked. */
+interface Call {
+    Body: Record<string, unknown> | null | undefined;
+}
+
 /** The page of a session as text plus the elements one can act on, each with a number, and the dialogs it dismissed. */
-async function snapshot(s) {
+async function snapshot(s: Session): Promise<Snapshot> {
     const shown = await s.page.evaluate((max) => {
-        const visible = (el) => {
+        const visible = (el: Element) => {
             const r = el.getBoundingClientRect();
             const style = getComputedStyle(el);
             return r.width > 0 && r.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
         };
         document.querySelectorAll('[data-mercurius-ref]').forEach((el) => el.removeAttribute('data-mercurius-ref'));
-        const elements = [];
+        const elements: string[] = [];
         let n = 0;
-        for (const el of document.querySelectorAll('a[href], button, input, textarea, select, [role=button], [contenteditable=true]')) {
+        for (const el of document.querySelectorAll<ShownElement>('a[href], button, input, textarea, select, [role=button], [contenteditable=true]')) {
             if (!visible(el) || n >= 200) {
                 continue;
             }
@@ -126,7 +157,7 @@ async function snapshot(s) {
             const kind = el.tagName.toLowerCase() + (el.type ? `:${el.type}` : '');
             // a list shows what is chosen and what may be: the agent picks by value or text (select)
             const choices = el.tagName === 'SELECT'
-                ? ' {' + [...el.options].slice(0, 30).map((o) => `${o.selected ? '*' : ''}${o.value}=${o.text.trim().slice(0, 40)}`).join(' | ') + (el.options.length > 30 ? ' | …' : '') + '}'
+                ? ' {' + [...(el as HTMLSelectElement).options].slice(0, 30).map((o) => `${o.selected ? '*' : ''}${o.value}=${o.text.trim().slice(0, 40)}`).join(' | ') + ((el as HTMLSelectElement).options.length > 30 ? ' | …' : '') + '}'
                 : '';
             elements.push(`[${n}] ${kind} ${label.replace(/\s+/g, ' ')}${choices}${el.href ? ' → ' + el.href : ''}`);
         }
@@ -136,7 +167,7 @@ async function snapshot(s) {
     return { ...shown, dialogs: s.dialogs.splice(0) };
 }
 
-async function settle(page) {
+async function settle(page: Page): Promise<void> {
     await Promise.race([
         page.waitForNetworkIdle({ idleTime: 500, timeout: 8000 }).catch(() => {}),
         new Promise((resolve) => setTimeout(resolve, 8000)),
@@ -152,50 +183,51 @@ app.addHook('onRequest', async (request, reply) => {
     const given = Buffer.from((request.headers.authorization ?? '').replace(/^Bearer /, ''));
     const expected = Buffer.from(TOKEN);
     if (given.length !== expected.length || !timingSafeEqual(given, expected)) {
-        reply.code(401).send({ error: 'unauthorized' });
+        void reply.code(401).send({ error: 'unauthorized' });
     }
 });
 
-app.addHook('preHandler', async (request, reply) => {
+app.addHook<Call>('preHandler', async (request, reply) => {
     // every call names its profile as a path of a participant; adopt alone has none
-    const profile = String(request.body?.profile ?? '');
+    const given = request.body?.profile;
+    const profile = typeof given === 'string' ? given : '';
     if (request.method === 'POST' && request.url !== '/adopt' && !PROFILE.test(profile)) {
-        reply.code(400).send({ error: 'bad profile' });
+        void reply.code(400).send({ error: 'bad profile' });
     }
 });
 
 app.get('/health', async () => ({ ok: true, sessions: sessions.size }));
 
-app.post('/navigate', async (request, reply) => {
+app.post<Call>('/navigate', async (request, reply) => {
     const { url, profile = 'main', allow = [] } = request.body ?? {};
     const hosts = Array.isArray(allow)
-        ? allow.filter((h) => typeof h === 'string' && h.length > 0 && h.length <= 253).slice(0, 4).map((h) => h.toLowerCase())
+        ? allow.filter((h: unknown): h is string => typeof h === 'string' && h.length > 0 && h.length <= 253).slice(0, 4).map((h) => h.toLowerCase())
         : [];
-    const reason = await refusal(String(url ?? ''), undefined, new Set(hosts));
+    const reason = await refusal(typeof url === 'string' ? url : '', undefined, new Set(hosts));
     if (reason !== null) {
         return reply.code(403).send({ error: `адрес запрещён: ${reason}` });
     }
-    const s = await session(profile);
+    const s = await session(String(profile));
     const { page, allowed } = s;
     allowed.clear();
     hosts.forEach((h) => allowed.add(h));
     try {
-        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: NAV_TIMEOUT_MS });
+        await page.goto(String(url), { waitUntil: 'domcontentloaded', timeout: NAV_TIMEOUT_MS });
     } catch (e) {
-        return reply.code(502).send({ error: `страница не открылась: ${e.name}` });
+        return reply.code(502).send({ error: `страница не открылась: ${(e as Error).name}` });
     }
     await settle(page);
     return snapshot(s);
 });
 
-app.post('/read', async (request) => {
+app.post<Call>('/read', async (request) => {
     const { profile = 'main' } = request.body ?? {};
-    return snapshot(await session(profile));
+    return snapshot(await session(String(profile)));
 });
 
-app.post('/click', async (request, reply) => {
+app.post<Call>('/click', async (request, reply) => {
     const { ref, profile = 'main' } = request.body ?? {};
-    const s = await session(profile);
+    const s = await session(String(profile));
     const element = await s.page.$(`[data-mercurius-ref="${Number(ref)}"]`);
     if (!element) {
         return reply.code(404).send({ error: 'элемента с таким номером нет — сначала прочитай страницу' });
@@ -210,14 +242,14 @@ app.post('/click', async (request, reply) => {
  * Picks an option of a list by its value or text, as a person would: the page gets input and change events.
  * spec: BRIEF.md#интернет-и-браузер — the agent picks a value in a list
  */
-app.post('/select', async (request, reply) => {
+app.post<Call>('/select', async (request, reply) => {
     const { ref, value = '', profile = 'main' } = request.body ?? {};
-    const s = await session(profile);
+    const s = await session(String(profile));
     const element = await s.page.$(`[data-mercurius-ref="${Number(ref)}"]`);
     if (!element) {
         return reply.code(404).send({ error: 'элемента с таким номером нет — сначала прочитай страницу' });
     }
-    const options = await element.evaluate((el) => (el.tagName === 'SELECT' ? [...el.options].map((o) => ({ value: o.value, text: o.text })) : null));
+    const options = await element.evaluate((el) => (el.tagName === 'SELECT' ? [...(el as HTMLSelectElement).options].map((o) => ({ value: o.value, text: o.text })) : null));
     if (options === null) {
         return reply.code(400).send({ error: 'это не список выбора: select — для элементов select, кнопки нажимают click' });
     }
@@ -231,14 +263,14 @@ app.post('/select', async (request, reply) => {
 });
 
 /** Scrolls the page most of a screen down or up, or to the top or the bottom; a lazy page loads what comes next. */
-app.post('/scroll', async (request, reply) => {
+app.post<Call>('/scroll', async (request, reply) => {
     const { direction = 'down', profile = 'main' } = request.body ?? {};
     const target = scrollTarget(String(direction), 900);
     if (target === null) {
         return reply.code(400).send({ error: 'direction — down, up, top или bottom' });
     }
-    const s = await session(profile);
-    await s.page.evaluate((t) => {
+    const s = await session(String(profile));
+    await s.page.evaluate((t: ScrollTarget) => {
         if (t.to === 'top') {
             window.scrollTo(0, 0);
         } else if (t.to === 'bottom') {
@@ -252,14 +284,14 @@ app.post('/scroll', async (request, reply) => {
 });
 
 /** Goes back in the page's history; every request of the page it returns to is checked as on open. */
-app.post('/back', async (request, reply) => {
+app.post<Call>('/back', async (request, reply) => {
     const { profile = 'main' } = request.body ?? {};
-    const s = await session(profile);
+    const s = await session(String(profile));
     let response;
     try {
         response = await s.page.goBack({ waitUntil: 'domcontentloaded', timeout: NAV_TIMEOUT_MS });
     } catch (e) {
-        return reply.code(502).send({ error: `назад не вернулась: ${e.name}` });
+        return reply.code(502).send({ error: `назад не вернулась: ${(e as Error).name}` });
     }
     if (response === null && s.page.url() === 'about:blank') {
         return reply.code(409).send({ error: 'назад некуда: это первая страница' });
@@ -268,9 +300,9 @@ app.post('/back', async (request, reply) => {
     return snapshot(s);
 });
 
-app.post('/type', async (request, reply) => {
+app.post<Call>('/type', async (request, reply) => {
     const { ref, text = '', submit = false, profile = 'main' } = request.body ?? {};
-    const s = await session(profile);
+    const s = await session(String(profile));
     const { page } = s;
     const element = await page.$(`[data-mercurius-ref="${Number(ref)}"]`);
     if (!element) {
@@ -279,22 +311,22 @@ app.post('/type', async (request, reply) => {
     // spec: BRIEF.md#решения-по-доработкам-2026-11-18 — typing only into fields, focused without a mouse click; the
     // text goes in as text (a line break is a line break, never the Enter key), sending only by an explicit submit
     const kind = await element.evaluate((el) => ({
-        tag: el.tagName, type: el.getAttribute('type') ?? '', editable: el.isContentEditable === true,
-        disabled: el.disabled === true, readOnly: el.readOnly === true,
+        tag: el.tagName, type: el.getAttribute('type') ?? '', editable: (el as HTMLElement).isContentEditable === true,
+        disabled: (el as HTMLInputElement).disabled === true, readOnly: (el as HTMLInputElement).readOnly === true,
     }));
     if (!typable(kind)) {
         return reply.code(400).send({ error: 'вводить текст можно только в поле ввода; кнопку нажимают действием click' });
     }
     await element.evaluate((el) => {
-        el.focus();
-        if (typeof el.select === 'function') {
-            el.select();
+        (el as HTMLElement).focus();
+        if (typeof (el as HTMLInputElement).select === 'function') {
+            (el as HTMLInputElement).select();
         } else {
             const range = document.createRange();
             range.selectNodeContents(el);
             const selection = window.getSelection();
-            selection.removeAllRanges();
-            selection.addRange(range);
+            selection!.removeAllRanges();
+            selection!.addRange(range);
         }
     });
     if (String(text) === '') {
@@ -316,7 +348,7 @@ app.post('/type', async (request, reply) => {
  * page or its connections, so it cannot send anything; closing the copy ends whatever it left running.
  * spec: BRIEF.md#скрипты-браузера-решение-владельца-2026-11-17
  */
-async function frozenCopy(s, host) {
+async function frozenCopy(s: Session, host: string): Promise<Page> {
     const html = await s.page.content();
     const url = s.page.url();
     const copy = await s.browser.newPage();
@@ -329,14 +361,14 @@ async function frozenCopy(s, host) {
             // the address of the request has no #fragment, the page's may have one (web.telegram.org/k/#@chat)
             if (!served && request.isNavigationRequest() && request.url().split('#')[0] === url.split('#')[0]) {
                 served = true;
-                request.respond({ status: 200, contentType: 'text/html; charset=utf-8', body: html });
+                void request.respond({ status: 200, contentType: 'text/html; charset=utf-8', body: html });
                 return;
             }
             const reason = readOnlyRefusal(request.method(), request.url(), host) ?? await refusal(request.url(), undefined, s.allowed);
             if (reason === null) {
-                request.continue();
+                void request.continue();
             } else {
-                request.abort('accessdenied');
+                void request.abort('accessdenied');
             }
         });
         await copy.goto(url, { waitUntil: 'domcontentloaded', timeout: NAV_TIMEOUT_MS });
@@ -350,7 +382,7 @@ async function frozenCopy(s, host) {
     }
 }
 
-app.post('/evaluate', async (request, reply) => {
+app.post<Call>('/evaluate', async (request, reply) => {
     const { profile = 'main', source = '', args = {}, mode = 'read', host = '' } = request.body ?? {};
     if (typeof source !== 'string' || source.trim() === '' || source.length > SCRIPT_MAX) {
         return reply.code(400).send({ error: `скрипт пуст или длиннее ${SCRIPT_MAX} символов` });
@@ -358,7 +390,7 @@ app.post('/evaluate', async (request, reply) => {
     if (mode !== 'read' && mode !== 'act') {
         return reply.code(400).send({ error: 'mode — read или act' });
     }
-    const s = await session(profile);
+    const s = await session(String(profile));
     let current = '';
     try {
         current = new URL(s.page.url()).hostname.toLowerCase();
@@ -366,21 +398,21 @@ app.post('/evaluate', async (request, reply) => {
         // an empty tab
     }
     if (current === '' || current !== String(host).toLowerCase()) {
-        return reply.code(409).send({ error: `страница открыта на ${current || 'пустой вкладке'}, а скрипт — для ${host}: сначала open` });
+        return reply.code(409).send({ error: `страница открыта на ${current || 'пустой вкладке'}, а скрипт — для ${String(host)}: сначала open` });
     }
     if (s.busy) {
         return reply.code(409).send({ error: 'в этом профиле уже работает скрипт' });
     }
     s.busy = true;
     let page = s.page;
-    let timer;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     try {
         if (mode === 'read') {
             page = await frozenCopy(s, current);
         }
         const result = await Promise.race([
             page.evaluate(scriptExpression(source, args)),
-            new Promise((_, reject) => {
+            new Promise<never>((_, reject) => {
                 timer = setTimeout(() => reject(new Error(`скрипт работал дольше ${SCRIPT_TIMEOUT_MS / 1000} с`)), SCRIPT_TIMEOUT_MS);
             }),
         ]);
@@ -390,7 +422,7 @@ app.post('/evaluate', async (request, reply) => {
         const text = JSON.stringify(result ?? null) ?? 'null';
         return { url: s.page.url(), result: text.slice(0, RESULT_MAX), truncated: text.length > RESULT_MAX };
     } catch (e) {
-        return reply.code(422).send({ error: `скрипт не выполнен: ${String(e?.message ?? e).slice(0, 500)}` });
+        return reply.code(422).send({ error: `скрипт не выполнен: ${String((e as { message?: unknown } | null | undefined)?.message ?? e).slice(0, 500)}` });
     } finally {
         clearTimeout(timer);
         s.busy = false;
@@ -401,9 +433,9 @@ app.post('/evaluate', async (request, reply) => {
     }
 });
 
-app.post('/screenshot', async (request) => {
+app.post<Call>('/screenshot', async (request) => {
     const { profile = 'main' } = request.body ?? {};
-    const { page } = await session(profile);
+    const { page } = await session(String(profile));
     const png = await page.screenshot({ type: 'png' });
     return { url: page.url(), png: Buffer.from(png).toString('base64') };
 });
@@ -413,19 +445,19 @@ app.post('/screenshot', async (request) => {
  * stay. The agent calls it once at start with the owner's folder; a profile already there is left as it is.
  * spec: BRIEF.md#решения-по-доработкам-2026-11-18 — profiles of the browser are laid out by participants and projects
  */
-app.post('/adopt', async (request, reply) => {
+app.post<Call>('/adopt', async (request, reply) => {
     const { owner = '' } = request.body ?? {};
     if (!/^p\d{1,10}$/.test(String(owner))) {
         return reply.code(400).send({ error: 'bad owner' });
     }
-    const moved = [];
-    await mkdir(`${PROFILES_DIR}/${owner}`, { recursive: true });
+    const moved: string[] = [];
+    await mkdir(`${PROFILES_DIR}/${String(owner)}`, { recursive: true });
     for (const name of await readdir(PROFILES_DIR)) {
         if (!legacyProfile(name) || !(await stat(`${PROFILES_DIR}/${name}`)).isDirectory()) {
             continue;
         }
         await close(name);
-        const target = `${PROFILES_DIR}/${owner}/${name}`;
+        const target = `${PROFILES_DIR}/${String(owner)}/${name}`;
         if (await stat(target).then(() => true, () => false)) {
             continue;
         }
@@ -435,9 +467,9 @@ app.post('/adopt', async (request, reply) => {
     return { moved };
 });
 
-app.post('/close', async (request) => {
+app.post<Call>('/close', async (request) => {
     const { profile = 'main' } = request.body ?? {};
-    await close(profile);
+    await close(String(profile));
     return { ok: true };
 });
 

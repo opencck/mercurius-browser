@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { dialogLine, optionFor, scrollTarget } from '../guard.js';
+import { dialogLine, optionFor, scrollTarget } from '../src/guard.js';
 
 const options = [
     { value: '', text: 'Выберите город' },
