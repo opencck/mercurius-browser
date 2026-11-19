@@ -6,7 +6,7 @@ import Fastify from 'fastify';
 import puppeteer from 'puppeteer-core';
 import { timingSafeEqual } from 'node:crypto';
 import { mkdir, readdir, rename, stat } from 'node:fs/promises';
-import { PROFILE, legacyProfile, readOnlyRefusal, refusal, scriptExpression, typable } from './guard.js';
+import { PROFILE, dialogLine, legacyProfile, optionFor, readOnlyRefusal, refusal, scriptExpression, scrollTarget, typable } from './guard.js';
 import { startProxy } from './proxy.js';
 
 const TOKEN = process.env.BROWSER_TOKEN ?? '';
@@ -42,7 +42,16 @@ async function session(profile) {
             args: ['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu', '--no-first-run', '--lang=ru-RU',
                 `--proxy-server=http://127.0.0.1:${proxy.port}`, '--proxy-bypass-list=<-loopback>'],
         });
+        // dialogs the pages opened since the last answer, already dismissed; the next snapshot tells the agent
+        const dialogs = [];
         const guard = async (tab) => {
+            tab.on('dialog', async (dialog) => {
+                dialogs.push(dialogLine(dialog.type(), dialog.message()));
+                if (dialogs.length > 20) {
+                    dialogs.shift();
+                }
+                await dialog.dismiss().catch(() => {});
+            });
             await tab.setRequestInterception(true);
             tab.on('request', async (request) => {
                 const reason = await refusal(request.url(), undefined, allowed);
@@ -60,14 +69,24 @@ async function session(profile) {
                 return;
             }
             const tab = await target.page().catch(() => null);
-            if (tab !== null) {
-                await guard(tab).catch(() => {});
+            if (tab === null) {
+                return;
+            }
+            await guard(tab).catch(() => {});
+            // spec: BRIEF.md#интернет-и-браузер — a tab the page opened becomes the current one: the agent works with
+            //       one page, and a link with target=_blank must not leave it on the old one
+            const current = sessions.get(profile);
+            if (current && current.page !== tab) {
+                const old = current.page;
+                current.page = tab;
+                await tab.setViewport({ width: 1280, height: 900 }).catch(() => {});
+                old.close().catch(() => {});
             }
         });
         const page = (await browser.pages())[0] ?? (await browser.newPage());
         await page.setViewport({ width: 1280, height: 900 });
         await guard(page);
-        s = { browser, page, timer: null, allowed, proxy };
+        s = { browser, page, timer: null, allowed, proxy, dialogs };
         sessions.set(profile, s);
     }
     if (s.timer) {
@@ -86,9 +105,9 @@ async function close(profile) {
     }
 }
 
-/** The page as text plus the elements one can act on, each with a number. */
-async function snapshot(page) {
-    return page.evaluate((max) => {
+/** The page of a session as text plus the elements one can act on, each with a number, and the dialogs it dismissed. */
+async function snapshot(s) {
+    const shown = await s.page.evaluate((max) => {
         const visible = (el) => {
             const r = el.getBoundingClientRect();
             const style = getComputedStyle(el);
@@ -105,11 +124,16 @@ async function snapshot(page) {
             el.setAttribute('data-mercurius-ref', String(n));
             const label = (el.innerText || el.value || el.getAttribute('aria-label') || el.getAttribute('placeholder') || el.getAttribute('name') || '').trim().slice(0, 80);
             const kind = el.tagName.toLowerCase() + (el.type ? `:${el.type}` : '');
-            elements.push(`[${n}] ${kind} ${label}${el.href ? ' → ' + el.href : ''}`);
+            // a list shows what is chosen and what may be: the agent picks by value or text (select)
+            const choices = el.tagName === 'SELECT'
+                ? ' {' + [...el.options].slice(0, 30).map((o) => `${o.selected ? '*' : ''}${o.value}=${o.text.trim().slice(0, 40)}`).join(' | ') + (el.options.length > 30 ? ' | …' : '') + '}'
+                : '';
+            elements.push(`[${n}] ${kind} ${label.replace(/\s+/g, ' ')}${choices}${el.href ? ' → ' + el.href : ''}`);
         }
         const text = (document.body ? document.body.innerText : '').replace(/\n{3,}/g, '\n\n').slice(0, max);
         return { url: location.href, title: document.title, text, elements };
     }, TEXT_MAX);
+    return { ...shown, dialogs: s.dialogs.splice(0) };
 }
 
 async function settle(page) {
@@ -151,7 +175,8 @@ app.post('/navigate', async (request, reply) => {
     if (reason !== null) {
         return reply.code(403).send({ error: `адрес запрещён: ${reason}` });
     }
-    const { page, allowed } = await session(profile);
+    const s = await session(profile);
+    const { page, allowed } = s;
     allowed.clear();
     hosts.forEach((h) => allowed.add(h));
     try {
@@ -160,29 +185,93 @@ app.post('/navigate', async (request, reply) => {
         return reply.code(502).send({ error: `страница не открылась: ${e.name}` });
     }
     await settle(page);
-    return snapshot(page);
+    return snapshot(s);
 });
 
 app.post('/read', async (request) => {
     const { profile = 'main' } = request.body ?? {};
-    return snapshot((await session(profile)).page);
+    return snapshot(await session(profile));
 });
 
 app.post('/click', async (request, reply) => {
     const { ref, profile = 'main' } = request.body ?? {};
-    const { page } = await session(profile);
-    const element = await page.$(`[data-mercurius-ref="${Number(ref)}"]`);
+    const s = await session(profile);
+    const element = await s.page.$(`[data-mercurius-ref="${Number(ref)}"]`);
     if (!element) {
         return reply.code(404).send({ error: 'элемента с таким номером нет — сначала прочитай страницу' });
     }
     await element.click();
-    await settle(page);
-    return snapshot(page);
+    // a click may open a tab: the session moves to it, and the wait is for the page that is current then
+    await settle(s.page);
+    return snapshot(s);
+});
+
+/**
+ * Picks an option of a list by its value or text, as a person would: the page gets input and change events.
+ * spec: BRIEF.md#интернет-и-браузер — the agent picks a value in a list
+ */
+app.post('/select', async (request, reply) => {
+    const { ref, value = '', profile = 'main' } = request.body ?? {};
+    const s = await session(profile);
+    const element = await s.page.$(`[data-mercurius-ref="${Number(ref)}"]`);
+    if (!element) {
+        return reply.code(404).send({ error: 'элемента с таким номером нет — сначала прочитай страницу' });
+    }
+    const options = await element.evaluate((el) => (el.tagName === 'SELECT' ? [...el.options].map((o) => ({ value: o.value, text: o.text })) : null));
+    if (options === null) {
+        return reply.code(400).send({ error: 'это не список выбора: select — для элементов select, кнопки нажимают click' });
+    }
+    const chosen = optionFor(options, value);
+    if (chosen === null) {
+        return reply.code(400).send({ error: `в списке нет варианта «${String(value).slice(0, 80)}» или он не однозначен; варианты: ${options.slice(0, 30).map((o) => o.text.trim()).join(', ')}` });
+    }
+    await element.select(chosen);
+    await settle(s.page);
+    return snapshot(s);
+});
+
+/** Scrolls the page most of a screen down or up, or to the top or the bottom; a lazy page loads what comes next. */
+app.post('/scroll', async (request, reply) => {
+    const { direction = 'down', profile = 'main' } = request.body ?? {};
+    const target = scrollTarget(String(direction), 900);
+    if (target === null) {
+        return reply.code(400).send({ error: 'direction — down, up, top или bottom' });
+    }
+    const s = await session(profile);
+    await s.page.evaluate((t) => {
+        if (t.to === 'top') {
+            window.scrollTo(0, 0);
+        } else if (t.to === 'bottom') {
+            window.scrollTo(0, document.documentElement.scrollHeight);
+        } else {
+            window.scrollBy(0, t.by);
+        }
+    }, target);
+    await settle(s.page);
+    return snapshot(s);
+});
+
+/** Goes back in the page's history; every request of the page it returns to is checked as on open. */
+app.post('/back', async (request, reply) => {
+    const { profile = 'main' } = request.body ?? {};
+    const s = await session(profile);
+    let response;
+    try {
+        response = await s.page.goBack({ waitUntil: 'domcontentloaded', timeout: NAV_TIMEOUT_MS });
+    } catch (e) {
+        return reply.code(502).send({ error: `назад не вернулась: ${e.name}` });
+    }
+    if (response === null && s.page.url() === 'about:blank') {
+        return reply.code(409).send({ error: 'назад некуда: это первая страница' });
+    }
+    await settle(s.page);
+    return snapshot(s);
 });
 
 app.post('/type', async (request, reply) => {
     const { ref, text = '', submit = false, profile = 'main' } = request.body ?? {};
-    const { page } = await session(profile);
+    const s = await session(profile);
+    const { page } = s;
     const element = await page.$(`[data-mercurius-ref="${Number(ref)}"]`);
     if (!element) {
         return reply.code(404).send({ error: 'элемента с таким номером нет — сначала прочитай страницу' });
@@ -215,9 +304,9 @@ app.post('/type', async (request, reply) => {
     }
     if (submit) {
         await element.press('Enter');
-        await settle(page);
+        await settle(s.page);
     }
-    return snapshot(page);
+    return snapshot(s);
 });
 
 /**

@@ -17,10 +17,15 @@ names a profile whose logins survive restarts (`[a-z0-9][a-z0-9_-]{0,31}`).
 | `POST /navigate` | opens a URL |
 | `POST /read` | the text of the page and its links and fields |
 | `POST /click`, `POST /type` | acts on an element; `type` writes only into a text field, line breaks go in as text and only `submit` sends |
+| `POST /select` | picks an option of a list by its value, its text or a part of the text only one option has |
+| `POST /scroll` | scrolls `down`, `up`, to the `top` or the `bottom` |
+| `POST /back` | goes back in the page's history |
 | `POST /evaluate` | runs a script: on a frozen offline copy to read, or on the live page to act |
 | `POST /screenshot` | a PNG of the page |
 | `POST /close` | closes the profile's page |
 | `POST /adopt` | moves profiles of the old flat layout into the owner's set (`{"owner":"p1"}`), logins stay |
+
+A dialog of the page (`alert`, `confirm`, `prompt`, `beforeunload`) is dismissed at once and its text comes with the next answer (`dialogs`): an open dialog would hold the page. A tab the page opens becomes the current one.
 
 Every request of a page is checked against internal and private addresses (`guard.js`), so a page cannot reach the
 host's network. A session closes after 10 minutes without requests.

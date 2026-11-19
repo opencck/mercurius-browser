@@ -201,3 +201,51 @@ export const PROFILE = /^p\d{1,10}(?:\/projects\/\d{1,10})?\/[a-z0-9][a-z0-9_-]{
 export function legacyProfile(name) {
     return /^[a-z0-9][a-z0-9_-]{0,31}$/.test(name) && !/^p\d{1,10}$/.test(name);
 }
+
+/**
+ * The value of the option a wanted text names: its value, its text (any case, spaces around ignored), or a part of the
+ * text only one option has. Null — no such option, or the part is not enough to tell.
+ * spec: BRIEF.md#интернет-и-браузер — the agent picks a value in a list
+ */
+export function optionFor(options, wanted) {
+    const want = String(wanted).trim().toLowerCase();
+    if (want === '') {
+        return null;
+    }
+    const byValue = options.find((o) => String(o.value) === String(wanted).trim());
+    if (byValue) {
+        return byValue.value;
+    }
+    const byText = options.find((o) => String(o.text).trim().toLowerCase() === want);
+    if (byText) {
+        return byText.value;
+    }
+    const parts = options.filter((o) => String(o.text).toLowerCase().includes(want));
+    return parts.length === 1 ? parts[0].value : null;
+}
+
+/** Where a scroll goes: most of a screen down or up, or to an end; null for a direction there is not. */
+export function scrollTarget(direction, height) {
+    switch (direction) {
+        case 'down':
+            return { by: Math.round(height * 0.8) };
+        case 'up':
+            return { by: -Math.round(height * 0.8) };
+        case 'top':
+        case 'bottom':
+            return { to: direction };
+        default:
+            return null;
+    }
+}
+
+/**
+ * A native dialog (alert, confirm, prompt, beforeunload) as one line for the agent. The service dismisses it at once:
+ * an open dialog holds the page's JavaScript, and every action after it would hang.
+ * ref: references/hermes-agent/tools/browser_supervisor_dialogs.py@e96221fa:L47-L55, L198-L224 (DIALOG_POLICY_AUTO_DISMISS,
+ *      _admit_dialog) — the auto_dismiss policy with the closed dialog kept for the agent; hermes waits for the agent by
+ *      default (must_respond), here the dismissal is the only policy
+ */
+export function dialogLine(type, message) {
+    return `${type}: ${String(message).replace(/\s+/g, ' ').trim().slice(0, 500)}`;
+}
