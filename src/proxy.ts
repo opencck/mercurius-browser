@@ -1,7 +1,7 @@
 // The browser's only way out: a proxy on the loopback that resolves a name once, checks every address it got and
 // dials the checked one. Chromium resolving a name again on its own could get another, internal answer between the
 // check and the connection (DNS rebinding); through this proxy there is no second answer to swap in.
-// spec: brief/decisions.md#решения-по-доработкам-2026-11-18 — the browser connects to the address it checked
+// spec: brief/internet.md#как-сделано-поиск-чтение-и-браузер — the browser connects to the address it checked
 // ref: references/hermes-agent/tools/url_safety.py@e96221fa:L1-L10 — hermes re-applies the policy at TCP connect and
 //      dials the validated IP for its own HTTP client; here the same for the browser, as a proxy Chromium must use
 
