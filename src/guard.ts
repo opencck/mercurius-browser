@@ -1,6 +1,6 @@
 // Which addresses the browser may load: public ones only. Every request of a page is checked — the page itself,
 // its scripts, images, redirects — so a page cannot reach the agent's network, the cloud metadata service or the LAN.
-// spec: BRIEF.md#интернет-и-браузер — the browser does not open internal addresses; the check repeats after redirects
+// spec: brief/internet.md#интернет-и-браузер — the browser does not open internal addresses; the check repeats after redirects
 
 import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
@@ -105,7 +105,7 @@ export function isBlockedIp(ip: string): boolean {
 
 /**
  * Null when the URL may be loaded, the reason otherwise. A host in `allowed` is one the owner let in for this page.
- * spec: BRIEF.md#подтверждения-и-запреты — internal addresses only with the owner's permission
+ * spec: brief/agent-loop.md#контекст — internal addresses only with the owner's permission
  */
 export async function refusal(url: string, resolve: Resolve = lookup, allowed: Set<string> = new Set()): Promise<string | null> {
     let parsed: URL;
@@ -145,7 +145,7 @@ export async function refusal(url: string, resolve: Resolve = lookup, allowed: S
 /**
  * Why a request is refused while a read-only script runs; null — it may go. Only GET (and HEAD) to the page's own host:
  * a read changes nothing on the site, and nothing read can leave for another site, not even in a query string.
- * spec: BRIEF.md#скрипты-браузера-решение-владельца-2026-11-17
+ * spec: brief/internet.md#скрипты-браузера-решение-владельца-2026-11-17
  */
 export function readOnlyRefusal(method: string, url: string, host: string): string | null {
     let parsed: URL;
@@ -186,7 +186,7 @@ export interface TypableElement {
 /**
  * Whether `type` may write into an element described as {tag, type, editable, disabled, readOnly}: a text input, a
  * textarea or a contenteditable element — not a button or a link, so typing never presses anything.
- * spec: BRIEF.md#решения-по-доработкам-2026-11-18 — typing only into fields; sending only by an explicit submit or click
+ * spec: brief/decisions.md#решения-по-доработкам-2026-11-18 — typing only into fields; sending only by an explicit submit or click
  */
 export function typable(element: TypableElement | null | undefined): boolean {
     if (!element || element.disabled || element.readOnly) {
@@ -205,7 +205,7 @@ export function typable(element: TypableElement | null | undefined): boolean {
 /**
  * A profile is a path inside the profiles folder laid out by participants and projects: `p<id>/<name>` or
  * `p<id>/projects/<project>/<name>`. Nothing else is taken: the agent computes the path, a name never climbs out.
- * spec: BRIEF.md#решения-по-доработкам-2026-11-18 — profiles of the browser are laid out by participants and projects
+ * spec: brief/decisions.md#решения-по-доработкам-2026-11-18 — profiles of the browser are laid out by participants and projects
  */
 export const PROFILE = /^p\d{1,10}(?:\/projects\/\d{1,10})?\/[a-z0-9][a-z0-9_-]{0,31}$/;
 
@@ -217,7 +217,7 @@ export function legacyProfile(name: string): boolean {
 /**
  * The value of the option a wanted text names: its value, its text (any case, spaces around ignored), or a part of the
  * text only one option has. Null — no such option, or the part is not enough to tell.
- * spec: BRIEF.md#интернет-и-браузер — the agent picks a value in a list
+ * spec: brief/internet.md#интернет-и-браузер — the agent picks a value in a list
  */
 export function optionFor(options: Array<{ value: string; text: string }>, wanted: unknown): string | null {
     const want = String(wanted).trim().toLowerCase();

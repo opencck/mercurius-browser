@@ -1,5 +1,5 @@
 # The browser of the agent: Chromium from Debian under puppeteer-core, a Fastify API on port 3000.
-# spec: BRIEF.md#интернет-и-браузер
+# spec: brief/internet.md#интернет-и-браузер
 
 # Build: TypeScript compiled to dist/ with the dev dependencies, which stay in this stage.
 FROM node:22-bookworm-slim AS build

@@ -1,6 +1,6 @@
 // The browser of the Mercurius agent: one Chromium per profile (its cookies and logins kept on disk), one page per
 // profile, a small API for the agent. Every request a page makes is checked by guard.js.
-// spec: BRIEF.md#интернет-и-браузер
+// spec: brief/internet.md#интернет-и-браузер
 
 import Fastify from 'fastify';
 import puppeteer from 'puppeteer-core';
@@ -46,7 +46,7 @@ async function session(profile: string): Promise<Session> {
         await mkdir(`${PROFILES_DIR}/${profile}`, { recursive: true });
         // hosts the owner allowed for the current page; every navigation sets them anew
         const allowed = new Set<string>();
-        // spec: BRIEF.md#решения-по-доработкам-2026-11-18 — every connection of the browser goes through a proxy that
+        // spec: brief/decisions.md#решения-по-доработкам-2026-11-18 — every connection of the browser goes through a proxy that
         //       dials the address it checked; the loopback is not bypassed
         const proxy = await startProxy({ allowed: () => allowed });
         const browser = await puppeteer.launch({
@@ -87,7 +87,7 @@ async function session(profile: string): Promise<Session> {
                 return;
             }
             await guard(tab).catch(() => {});
-            // spec: BRIEF.md#интернет-и-браузер — a tab the page opened becomes the current one: the agent works with
+            // spec: brief/internet.md#интернет-и-браузер — a tab the page opened becomes the current one: the agent works with
             //       one page, and a link with target=_blank must not leave it on the old one
             const current = sessions.get(profile);
             if (current && current.page !== tab) {
@@ -240,7 +240,7 @@ app.post<Call>('/click', async (request, reply) => {
 
 /**
  * Picks an option of a list by its value or text, as a person would: the page gets input and change events.
- * spec: BRIEF.md#интернет-и-браузер — the agent picks a value in a list
+ * spec: brief/internet.md#интернет-и-браузер — the agent picks a value in a list
  */
 app.post<Call>('/select', async (request, reply) => {
     const { ref, value = '', profile = 'main' } = request.body ?? {};
@@ -308,7 +308,7 @@ app.post<Call>('/type', async (request, reply) => {
     if (!element) {
         return reply.code(404).send({ error: 'элемента с таким номером нет — сначала прочитай страницу' });
     }
-    // spec: BRIEF.md#решения-по-доработкам-2026-11-18 — typing only into fields, focused without a mouse click; the
+    // spec: brief/decisions.md#решения-по-доработкам-2026-11-18 — typing only into fields, focused without a mouse click; the
     // text goes in as text (a line break is a line break, never the Enter key), sending only by an explicit submit
     const kind = await element.evaluate((el) => ({
         tag: el.tagName, type: el.getAttribute('type') ?? '', editable: (el as HTMLElement).isContentEditable === true,
@@ -346,7 +346,7 @@ app.post<Call>('/type', async (request, reply) => {
  * off; while the copy loads, only GET to the same host, and before the script the tab goes offline — no fetch, no
  * WebSocket (blocked URL lists of CDP do not stop a WebSocket in Chromium 156, offline does). It cannot touch the live
  * page or its connections, so it cannot send anything; closing the copy ends whatever it left running.
- * spec: BRIEF.md#скрипты-браузера-решение-владельца-2026-11-17
+ * spec: brief/internet.md#скрипты-браузера-решение-владельца-2026-11-17
  */
 async function frozenCopy(s: Session, host: string): Promise<Page> {
     const html = await s.page.content();
@@ -443,7 +443,7 @@ app.post<Call>('/screenshot', async (request) => {
 /**
  * Moves the profiles of the old flat layout (a name at the top of the folder) into the set of the owner: their logins
  * stay. The agent calls it once at start with the owner's folder; a profile already there is left as it is.
- * spec: BRIEF.md#решения-по-доработкам-2026-11-18 — profiles of the browser are laid out by participants and projects
+ * spec: brief/decisions.md#решения-по-доработкам-2026-11-18 — profiles of the browser are laid out by participants and projects
  */
 app.post<Call>('/adopt', async (request, reply) => {
     const { owner = '' } = request.body ?? {};
