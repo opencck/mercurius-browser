@@ -105,7 +105,7 @@ export function isBlockedIp(ip: string): boolean {
 
 /**
  * Null when the URL may be loaded, the reason otherwise. A host in `allowed` is one the owner let in for this page.
- * spec: brief/agent-loop.md#контекст — internal addresses only with the owner's permission
+ * spec: brief/agent-loop.md#подтверждения-и-запреты — internal addresses only with the owner's permission
  */
 export async function refusal(url: string, resolve: Resolve = lookup, allowed: Set<string> = new Set()): Promise<string | null> {
     let parsed: URL;
