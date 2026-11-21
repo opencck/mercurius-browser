@@ -1,5 +1,7 @@
 [English](README.md) | [Русский](README.ru.md) | **中文**
 
+> 本文由模型翻译，尚未经人工审校；如有出入，以英文版为准。
+
 # mercurius-browser
 
 [Mercurius](https://github.com/opencck/mercurius) 智能体的浏览器：Debian 自带的 Chromium，由 puppeteer-core 驱动，
