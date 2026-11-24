@@ -31,6 +31,8 @@
 
 页面的每个请求都会对照内部地址和私有地址进行检查（`src/guard.ts`），并通过一个环回代理发出，该代理连接的是已检查过的地址（`src/proxy.ts`），因此页面无法触及主机的网络。会话在 10 分钟没有请求后关闭。
 
+该代理对整个服务只走一条出站路由：设置了 `BROWSER_VIA_VLESS` 时经由安装的 VLESS 隧道（浏览器旁的 `vless-proxy`），否则经由 `BROWSER_PROXY`，否则直连。`/health` 在 `route` 字段中给出路由。Chromium 在 `puppeteer-extra` 和 stealth 插件下运行，且不带自动化开关，因此拒绝无头浏览器的网站（User-Agent 中的 `HeadlessChrome`、`navigator.webdriver`）看到的是普通浏览器。
+
 ## 设置
 
 | 变量 | 默认值 | 含义 |
@@ -39,6 +41,9 @@
 | `PORT` | `3000` | 端口 |
 | `PROFILES_DIR` | `/profiles` | 保存带登录状态的配置文件的位置：`p<participant>/<name>`、`p<participant>/projects/<project>/<name>` |
 | `CHROMIUM_PATH` | `/usr/bin/chromium` | 浏览器 |
+| `BROWSER_VIA_VLESS` | — | 非空 — 经 VLESS 入口 `BROWSER_VLESS_PROXY` 出站 |
+| `BROWSER_VLESS_PROXY` | `http://vless-proxy:8080` | `vless-proxy` 的 HTTP 入口；用户 `browser`，密码为 `BROWSER_TOKEN` |
+| `BROWSER_PROXY` | — | 没有 VLESS 时所有者的代理：`socks5://`、`socks5h://` 或 `http://`，需要时带 `user:password@` |
 
 ## 运行
 

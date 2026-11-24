@@ -107,7 +107,7 @@ export function isBlockedIp(ip: string): boolean {
  * Null when the URL may be loaded, the reason otherwise. A host in `allowed` is one the owner let in for this page.
  * spec: brief/agent-loop.md#подтверждения-и-запреты — internal addresses only with the owner's permission
  */
-export async function refusal(url: string, resolve: Resolve = lookup, allowed: Set<string> = new Set()): Promise<string | null> {
+export async function refusal(url: string, resolve: Resolve = lookup, allowed: Set<string> = new Set(), remote = false): Promise<string | null> {
     let parsed: URL;
     try {
         parsed = new URL(url);
@@ -134,7 +134,8 @@ export async function refusal(url: string, resolve: Resolve = lookup, allowed: S
     try {
         addresses = await resolve(host, { all: true });
     } catch {
-        return 'имя не найдено';
+        // through an upstream proxy the far side resolves the name: the local DNS may not know it
+        return remote ? null : 'имя не найдено';
     }
     if (addresses.length === 0 || addresses.some((a) => isBlockedIp(a.address))) {
         return 'внутренний адрес';

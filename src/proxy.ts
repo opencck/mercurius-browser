@@ -6,11 +6,11 @@
 //      dials the validated IP for its own HTTP client; here the same for the browser, as a proxy Chromium must use
 
 import { createServer, request as httpRequest } from 'node:http';
-import { connect } from 'node:net';
 import { isIP } from 'node:net';
-import type { AddressInfo } from 'node:net';
+import type { AddressInfo, Socket } from 'node:net';
 import { lookup } from 'node:dns/promises';
 import { isBlockedIp } from './guard.js';
+import { dial } from './upstream.js';
 
 const CONNECT_TIMEOUT_MS = 15_000;
 
@@ -25,14 +25,16 @@ export interface Proxy {
 
 /**
  * The address to dial for a host, or the reason it is refused. A host the owner allowed may be internal; any other
- * must resolve to public addresses only. One lookup, its first good answer is the one dialed.
+ * must resolve to public addresses only. One lookup, its first good answer is the one dialed. Through an upstream
+ * proxy the name itself goes on — the far side resolves it, where the local DNS may lie or know nothing of it — but a
+ * name the local DNS knows still must not lead inside.
  *
  * @param {string} host
  * @param {(host: string, options: object) => Promise<Array<{address: string, family: number}>>} resolve
  * @param {Set<string>} allowed
  * @returns {Promise<{address: string}|{refused: string}>}
  */
-export async function pick(host: string, resolve: Resolve, allowed: Set<string>): Promise<{ address: string } | { refused: string }> {
+export async function pick(host: string, resolve: Resolve, allowed: Set<string>, remote = false): Promise<{ address: string } | { refused: string }> {
     const name = host.replace(/^\[|\]$/g, '').toLowerCase();
     const permitted = allowed.has(name);
     if (isIP(name)) {
@@ -45,24 +47,25 @@ export async function pick(host: string, resolve: Resolve, allowed: Set<string>)
     try {
         addresses = await resolve(name, { all: true });
     } catch {
-        return { refused: 'name not found' };
+        return remote ? { address: name } : { refused: 'name not found' };
     }
     if (addresses.length === 0) {
-        return { refused: 'name not found' };
+        return remote ? { address: name } : { refused: 'name not found' };
     }
     if (!permitted && addresses.some((a) => isBlockedIp(a.address))) {
         return { refused: 'internal address' };
     }
-    return { address: addresses[0].address };
+    return { address: remote ? name : addresses[0].address };
 }
 
 /**
  * Starts the proxy on a free port of the loopback.
  *
- * @param {{resolve?: Function, allowed: () => Set<string>}} options allowed — the hosts the owner let in for the page now
- * @returns {Promise<{port: number, close: () => Promise<void>}>}
+ * @param options allowed — the hosts the owner let in for the page now; upstream — the proxy every connection goes
+ *        through (the VLESS tunnel or the owner's proxy), null — directly
  */
-export async function startProxy({ resolve = lookup, allowed }: { resolve?: Resolve; allowed: () => Set<string> }): Promise<Proxy> {
+export async function startProxy({ resolve = lookup, allowed, upstream = null }: { resolve?: Resolve; allowed: () => Set<string>; upstream?: URL | null }): Promise<Proxy> {
+    const remote = upstream !== null;
     const server = createServer(async (req, res) => {
         // plain http: the request names the whole address
         let url: URL;
@@ -76,14 +79,21 @@ export async function startProxy({ resolve = lookup, allowed }: { resolve?: Reso
             res.writeHead(400).end();
             return;
         }
-        const target = await pick(url.hostname, resolve, allowed());
+        const target = await pick(url.hostname, resolve, allowed(), remote);
         if ('refused' in target) {
             res.writeHead(403, { 'content-type': 'text/plain' }).end(target.refused);
             return;
         }
-        const upstream = httpRequest({
-            host: target.address,
-            port: url.port === '' ? 80 : Number(url.port),
+        const port = url.port === '' ? 80 : Number(url.port);
+        let socket: Socket;
+        try {
+            socket = await dial(target.address, port, upstream, CONNECT_TIMEOUT_MS);
+        } catch {
+            res.writeHead(502).end();
+            return;
+        }
+        const forward = httpRequest({
+            createConnection: () => socket,
             method: req.method,
             path: url.pathname + url.search,
             headers: { ...req.headers, host: url.host },
@@ -92,15 +102,15 @@ export async function startProxy({ resolve = lookup, allowed }: { resolve?: Reso
             res.writeHead(answer.statusCode ?? 502, answer.headers);
             answer.pipe(res);
         });
-        upstream.on('timeout', () => upstream.destroy());
-        upstream.on('error', () => {
+        forward.on('timeout', () => forward.destroy());
+        forward.on('error', () => {
             if (!res.headersSent) {
                 res.writeHead(502).end();
             } else {
                 res.destroy();
             }
         });
-        req.pipe(upstream);
+        req.pipe(forward);
     });
 
     // https and websockets: a tunnel to host:port, opened only to the checked address
@@ -110,23 +120,26 @@ export async function startProxy({ resolve = lookup, allowed }: { resolve?: Reso
             client.end('HTTP/1.1 400 Bad Request\r\n\r\n');
             return;
         }
-        const target = await pick(match[1], resolve, allowed());
+        const target = await pick(match[1], resolve, allowed(), remote);
         if ('refused' in target) {
             client.end(`HTTP/1.1 403 Forbidden\r\n\r\n${target.refused}`);
             return;
         }
-        const upstream = connect({ host: target.address, port: Number(match[2]), timeout: CONNECT_TIMEOUT_MS }, () => {
-            upstream.setTimeout(0);
-            client.write('HTTP/1.1 200 Connection Established\r\n\r\n');
-            if (head.length > 0) {
-                upstream.write(head);
-            }
-            upstream.pipe(client);
-            client.pipe(upstream);
-        });
-        upstream.on('timeout', () => upstream.destroy());
-        upstream.on('error', () => client.end('HTTP/1.1 502 Bad Gateway\r\n\r\n'));
-        client.on('error', () => upstream.destroy());
+        let tunnel: Socket;
+        try {
+            tunnel = await dial(target.address, Number(match[2]), upstream, CONNECT_TIMEOUT_MS);
+        } catch {
+            client.end('HTTP/1.1 502 Bad Gateway\r\n\r\n');
+            return;
+        }
+        client.write('HTTP/1.1 200 Connection Established\r\n\r\n');
+        if (head.length > 0) {
+            tunnel.write(head);
+        }
+        tunnel.pipe(client);
+        client.pipe(tunnel);
+        tunnel.on('error', () => client.destroy());
+        client.on('error', () => tunnel.destroy());
     });
 
     // an upgrade over plain http (ws://) is not proxied: a page gets wss through a tunnel

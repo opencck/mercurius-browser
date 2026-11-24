@@ -3,7 +3,9 @@
 // spec: brief/internet.md#как-сделано-поиск-чтение-и-браузер
 
 import Fastify from 'fastify';
-import puppeteer from 'puppeteer-core';
+import puppeteerCore from 'puppeteer-core';
+import { addExtra } from 'puppeteer-extra';
+import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import type { Browser, Page } from 'puppeteer-core';
 import { timingSafeEqual } from 'node:crypto';
 import { mkdir, readdir, rename, stat } from 'node:fs/promises';
@@ -11,6 +13,8 @@ import { PROFILE, dialogLine, legacyProfile, optionFor, readOnlyRefusal, refusal
 import type { ScrollTarget } from './guard.js';
 import { startProxy } from './proxy.js';
 import type { Proxy } from './proxy.js';
+import { routeFrom } from './upstream.js';
+import type { Route } from './upstream.js';
 
 const TOKEN = process.env.BROWSER_TOKEN ?? '';
 const PROFILES_DIR = process.env.PROFILES_DIR ?? '/profiles';
@@ -25,6 +29,26 @@ if (TOKEN.length < 16) {
     console.error('BROWSER_TOKEN must be at least 16 characters');
     process.exit(1);
 }
+
+// spec: brief/internet.md#как-сделано-поиск-чтение-и-браузер — the browser leaves through the VLESS tunnel of the
+//       installation, else through the owner's proxy, else directly; a proxy that cannot be read stops the start
+let ROUTE: Route;
+try {
+    ROUTE = routeFrom(process.env);
+} catch (error) {
+    console.error((error as Error).message);
+    process.exit(1);
+}
+
+// A site that sees "HeadlessChrome" or navigator.webdriver refuses the page (x.com answers 403, Google says the browser
+// may not be secure): the stealth plugin makes the headless Chromium look like an ordinary one.
+// ref: puppeteer-extra-plugin-stealth 2.11.2 (npm) — the evasions of user agent, webdriver, plugins, languages, WebGL
+//      vendor, chrome.runtime; no reference repository has an implementation of its own (hermes drives no Chromium)
+const puppeteer = addExtra(puppeteerCore as unknown as Parameters<typeof addExtra>[0]);
+puppeteer.use(StealthPlugin());
+/** the window of an ordinary laptop: a viewport of 1280×900 in a window of that size */
+const WIDTH = 1280;
+const HEIGHT = 900;
 
 /** @type {Map<string, {browser: import('puppeteer-core').Browser, page: import('puppeteer-core').Page, timer: NodeJS.Timeout|null}>} */
 const sessions = new Map<string, Session>();
@@ -48,14 +72,17 @@ async function session(profile: string): Promise<Session> {
         const allowed = new Set<string>();
         // spec: brief/internet.md#как-сделано-поиск-чтение-и-браузер — every connection of the browser goes through a proxy that
         //       dials the address it checked; the loopback is not bypassed
-        const proxy = await startProxy({ allowed: () => allowed });
+        const proxy = await startProxy({ allowed: () => allowed, upstream: ROUTE.upstream });
         const browser = await puppeteer.launch({
             executablePath: process.env.CHROMIUM_PATH ?? '/usr/bin/chromium',
             userDataDir: `${PROFILES_DIR}/${profile}`,
             headless: true,
+            // the switch that announces automation goes; the window has the size of the viewport
+            ignoreDefaultArgs: ['--enable-automation'],
             args: ['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu', '--no-first-run', '--lang=ru-RU',
+                '--disable-blink-features=AutomationControlled', `--window-size=${WIDTH},${HEIGHT}`,
                 `--proxy-server=http://127.0.0.1:${proxy.port}`, '--proxy-bypass-list=<-loopback>'],
-        });
+        }) as unknown as Browser;
         // dialogs the pages opened since the last answer, already dismissed; the next snapshot tells the agent
         const dialogs: string[] = [];
         const guard = async (tab: Page) => {
@@ -68,7 +95,7 @@ async function session(profile: string): Promise<Session> {
             });
             await tab.setRequestInterception(true);
             tab.on('request', async (request) => {
-                const reason = await refusal(request.url(), undefined, allowed);
+                const reason = await refusal(request.url(), undefined, allowed, ROUTE.upstream !== null);
                 if (reason === null) {
                     void request.continue();
                 } else {
@@ -93,12 +120,12 @@ async function session(profile: string): Promise<Session> {
             if (current && current.page !== tab) {
                 const old = current.page;
                 current.page = tab;
-                await tab.setViewport({ width: 1280, height: 900 }).catch(() => {});
+                await tab.setViewport({ width: WIDTH, height: HEIGHT }).catch(() => {});
                 old.close().catch(() => {});
             }
         });
         const page = (await browser.pages())[0] ?? (await browser.newPage());
-        await page.setViewport({ width: 1280, height: 900 });
+        await page.setViewport({ width: WIDTH, height: HEIGHT });
         await guard(page);
         s = { browser, page, timer: null, allowed, proxy, dialogs };
         sessions.set(profile, s);
@@ -196,7 +223,7 @@ app.addHook<Call>('preHandler', async (request, reply) => {
     }
 });
 
-app.get('/health', async () => ({ ok: true, sessions: sessions.size }));
+app.get('/health', async () => ({ ok: true, sessions: sessions.size, route: ROUTE.name }));
 
 app.post<Call>('/navigate', async (request, reply) => {
     const { url, profile = 'main', allow = [] } = request.body ?? {};

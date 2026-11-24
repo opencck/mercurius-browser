@@ -30,6 +30,8 @@ A dialog of the page (`alert`, `confirm`, `prompt`, `beforeunload`) is dismissed
 Every request of a page is checked against internal and private addresses (`src/guard.ts`) and goes out through a
 loopback proxy that dials the checked address (`src/proxy.ts`), so a page cannot reach the host's network. A session closes after 10 minutes without requests.
 
+That proxy goes out by one route for the whole service: through the VLESS tunnel of the installation (a `vless-proxy` beside the browser) when `BROWSER_VIA_VLESS` is set, else through `BROWSER_PROXY`, else directly. `/health` names the route in `route`. Chromium runs under `puppeteer-extra` with the stealth plugin and without the automation switch, so sites that refuse a headless browser (`HeadlessChrome` in the user agent, `navigator.webdriver`) see an ordinary one.
+
 ## Settings
 
 | Variable | Default | Meaning |
@@ -38,6 +40,9 @@ loopback proxy that dials the checked address (`src/proxy.ts`), so a page cannot
 | `PORT` | `3000` | port |
 | `PROFILES_DIR` | `/profiles` | where profiles with logins live: `p<participant>/<name>`, `p<participant>/projects/<project>/<name>` |
 | `CHROMIUM_PATH` | `/usr/bin/chromium` | the browser |
+| `BROWSER_VIA_VLESS` | — | non-empty — go out through the VLESS door `BROWSER_VLESS_PROXY` |
+| `BROWSER_VLESS_PROXY` | `http://vless-proxy:8080` | the HTTP door of `vless-proxy`; user `browser`, password `BROWSER_TOKEN` |
+| `BROWSER_PROXY` | — | the owner's proxy when there is no VLESS: `socks5://`, `socks5h://` or `http://`, with `user:password@` if needed |
 
 ## Run
 
