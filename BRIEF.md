@@ -74,7 +74,8 @@
   прокси — отказ старта: опечатка не должна выпустить браузер напрямую.
 - **VLESS — через `vless-proxy` рядом с браузером**, а не внутри него: Chromium умеет только HTTP- и SOCKS-прокси, а
   клиент VLESS (`rekryt/amphp-vless`) — PHP и уже есть в образе приложения. Сервис `vless-proxy` в профиле `browser`
-  поднимает HTTP-дверь туннеля в сети браузера, пароль — `BROWSER_TOKEN`; без `VLESS_URI` он только ждёт.
+  поднимает HTTP-дверь туннеля в сети браузера; без `VLESS_URI` браузер к ней не ходит. Дверь общая с песочницей и
+  логина не спрашивает (2026-11-24): она слушает только сети установки, а проверка адресов стоит перед ней.
 - **Браузер выглядит обычным** (2026-11-24): `puppeteer-extra` с `puppeteer-extra-plugin-stealth`, без ключа
   `--enable-automation`, с `--disable-blink-features=AutomationControlled` и окном размера страницы. Причина — x.com
   отвечал 403 на `HeadlessChrome` в User-Agent, Google отказывал во входе («This browser or app may not be secure»).

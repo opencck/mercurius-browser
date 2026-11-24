@@ -42,7 +42,7 @@
 | `PROFILES_DIR` | `/profiles` | 保存带登录状态的配置文件的位置：`p<participant>/<name>`、`p<participant>/projects/<project>/<name>` |
 | `CHROMIUM_PATH` | `/usr/bin/chromium` | 浏览器 |
 | `BROWSER_VIA_VLESS` | — | 非空 — 经 VLESS 入口 `BROWSER_VLESS_PROXY` 出站 |
-| `BROWSER_VLESS_PROXY` | `http://vless-proxy:8080` | `vless-proxy` 的 HTTP 入口；用户 `browser`，密码为 `BROWSER_TOKEN` |
+| `BROWSER_VLESS_PROXY` | `http://vless-proxy:8080` | `vless-proxy` 的 HTTP 入口；无需登录 |
 | `BROWSER_PROXY` | — | 没有 VLESS 时所有者的代理：`socks5://`、`socks5h://` 或 `http://`，需要时带 `user:password@` |
 
 ## 运行

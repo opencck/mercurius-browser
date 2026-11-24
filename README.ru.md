@@ -40,7 +40,7 @@ loopback, который соединяется с проверенным адр
 | `PROFILES_DIR` | `/profiles` | где лежат профили со входами: `p<участник>/<имя>`, `p<участник>/projects/<проект>/<имя>` |
 | `CHROMIUM_PATH` | `/usr/bin/chromium` | браузер |
 | `BROWSER_VIA_VLESS` | — | непусто — выход через дверь VLESS `BROWSER_VLESS_PROXY` |
-| `BROWSER_VLESS_PROXY` | `http://vless-proxy:8080` | HTTP-дверь `vless-proxy`; пользователь `browser`, пароль — `BROWSER_TOKEN` |
+| `BROWSER_VLESS_PROXY` | `http://vless-proxy:8080` | HTTP-дверь `vless-proxy`; логина она не спрашивает |
 | `BROWSER_PROXY` | — | прокси владельца, когда VLESS нет: `socks5://`, `socks5h://` или `http://`, при необходимости с `user:password@` |
 
 ## Запуск
