@@ -259,8 +259,19 @@ app.post<Call>('/read', async (request) => {
 });
 
 app.post<Call>('/click', async (request, reply) => {
-    const { ref, profile = 'main' } = request.body ?? {};
+    const { ref, x, y, profile = 'main' } = request.body ?? {};
     const s = await session(String(profile));
+    // a point of the screenshot: what stands in a frame of another site (the tick of a check "I am not a robot") has
+    // no number, a person looking at the screenshot says where to press
+    if (x !== undefined && y !== undefined) {
+        const [px, py] = [Number(x), Number(y)];
+        if (!Number.isFinite(px) || !Number.isFinite(py) || px < 0 || py < 0 || px >= WIDTH || py >= HEIGHT) {
+            return reply.code(400).send({ error: `точка вне снимка: x от 0 до ${WIDTH - 1}, y от 0 до ${HEIGHT - 1}` });
+        }
+        await s.page.mouse.click(px, py);
+        await settle(s.page);
+        return snapshot(s);
+    }
     const element = await s.page.$(`[data-mercurius-ref="${Number(ref)}"]`);
     if (!element) {
         return reply.code(404).send({ error: 'элемента с таким номером нет — сначала прочитай страницу' });
