@@ -25,16 +25,21 @@ export interface Route {
  * directly. A proxy of another scheme stops the start: a typo must not send the browser out directly.
  *
  * @param env BROWSER_VIA_VLESS (non-empty when VLESS_URI is set), BROWSER_VLESS_PROXY (the door of vless-proxy),
- *        BROWSER_TOKEN (its password), BROWSER_PROXY (socks5://, socks5h://, http://)
+ *        BROWSER_TOKEN (sent to the door, which asks for none), BROWSER_PROXY (socks5://, socks5h://, http://, or the
+ *        word direct)
  */
 export function routeFrom(env: NodeJS.ProcessEnv): Route {
+    const proxy = (env.BROWSER_PROXY ?? '').trim();
+    // the word direct keeps the browser off every route, the VLESS of the installation too
+    if (proxy.toLowerCase() === 'direct') {
+        return { name: 'direct', upstream: null };
+    }
     if ((env.BROWSER_VIA_VLESS ?? '').trim() !== '') {
         const door = new URL((env.BROWSER_VLESS_PROXY ?? '').trim() || 'http://vless-proxy:8080');
         door.username = 'browser';
         door.password = env.BROWSER_TOKEN ?? '';
         return { name: 'vless', upstream: checked(door) };
     }
-    const proxy = (env.BROWSER_PROXY ?? '').trim();
     if (proxy !== '') {
         return { name: 'proxy', upstream: checked(new URL(proxy)) };
     }

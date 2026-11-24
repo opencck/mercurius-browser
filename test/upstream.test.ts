@@ -108,6 +108,8 @@ test('the route is VLESS when the installation has it, else the proxy, else dire
     const vless = routeFrom({ BROWSER_VIA_VLESS: '1', BROWSER_PROXY: 'http://proxy.example:3128', BROWSER_TOKEN: 'token-0123456789abcdef' });
     assert.equal(vless.name, 'vless', 'VLESS wins over a proxy');
     assert.equal(vless.upstream?.href, 'http://browser:token-0123456789abcdef@vless-proxy:8080/');
+    assert.deepEqual(routeFrom({ BROWSER_VIA_VLESS: '1', BROWSER_PROXY: 'direct' }), { name: 'direct', upstream: null }, 'the word direct wins over VLESS');
+    assert.deepEqual(routeFrom({ BROWSER_PROXY: ' Direct ' }), { name: 'direct', upstream: null });
     assert.throws(() => routeFrom({ BROWSER_PROXY: 'ftp://proxy.example:21' }), /must be/);
     assert.throws(() => routeFrom({ BROWSER_PROXY: 'http://proxy.example' }), /must be/);
 });

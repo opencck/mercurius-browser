@@ -43,7 +43,7 @@
 | `CHROMIUM_PATH` | `/usr/bin/chromium` | 浏览器 |
 | `BROWSER_VIA_VLESS` | — | 非空 — 经 VLESS 入口 `BROWSER_VLESS_PROXY` 出站 |
 | `BROWSER_VLESS_PROXY` | `http://vless-proxy:8080` | `vless-proxy` 的 HTTP 入口；无需登录 |
-| `BROWSER_PROXY` | — | 没有 VLESS 时所有者的代理：`socks5://`、`socks5h://` 或 `http://`，需要时带 `user:password@` |
+| `BROWSER_PROXY` | — | 没有 VLESS 时所有者的代理：`socks5://`、`socks5h://` 或 `http://`，需要时带 `user:password@`；填 `direct` 则即使有 VLESS 也直连 |
 
 ## 运行
 

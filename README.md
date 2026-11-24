@@ -42,7 +42,7 @@ That proxy goes out by one route for the whole service: through the VLESS tunnel
 | `CHROMIUM_PATH` | `/usr/bin/chromium` | the browser |
 | `BROWSER_VIA_VLESS` | — | non-empty — go out through the VLESS door `BROWSER_VLESS_PROXY` |
 | `BROWSER_VLESS_PROXY` | `http://vless-proxy:8080` | the HTTP door of `vless-proxy`; it asks for no login |
-| `BROWSER_PROXY` | — | the owner's proxy when there is no VLESS: `socks5://`, `socks5h://` or `http://`, with `user:password@` if needed |
+| `BROWSER_PROXY` | — | the owner's proxy when there is no VLESS: `socks5://`, `socks5h://` or `http://`, with `user:password@` if needed; the word `direct` — directly even with VLESS |
 
 ## Run
 

@@ -41,7 +41,7 @@ loopback, который соединяется с проверенным адр
 | `CHROMIUM_PATH` | `/usr/bin/chromium` | браузер |
 | `BROWSER_VIA_VLESS` | — | непусто — выход через дверь VLESS `BROWSER_VLESS_PROXY` |
 | `BROWSER_VLESS_PROXY` | `http://vless-proxy:8080` | HTTP-дверь `vless-proxy`; логина она не спрашивает |
-| `BROWSER_PROXY` | — | прокси владельца, когда VLESS нет: `socks5://`, `socks5h://` или `http://`, при необходимости с `user:password@` |
+| `BROWSER_PROXY` | — | прокси владельца, когда VLESS нет: `socks5://`, `socks5h://` или `http://`, при необходимости с `user:password@`; слово `direct` — напрямую, даже при VLESS |
 
 ## Запуск
 
