@@ -124,7 +124,13 @@ async function session(profile: string): Promise<Session> {
                 old.close().catch(() => {});
             }
         });
-        const page = (await browser.pages())[0] ?? (await browser.newPage());
+        // the stealth plugins patch the tabs created after the start; the tab Chromium opened by itself is not one of
+        // them, so the service works in a tab of its own and closes the first
+        const first = await browser.pages();
+        const page = await browser.newPage();
+        for (const tab of first) {
+            await tab.close().catch(() => {});
+        }
         await page.setViewport({ width: WIDTH, height: HEIGHT });
         await guard(page);
         s = { browser, page, timer: null, allowed, proxy, dialogs };
