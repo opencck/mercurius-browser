@@ -8,7 +8,7 @@ import type { Browser, Page } from 'puppeteer-core';
 import { spawn } from 'node:child_process';
 import { timingSafeEqual } from 'node:crypto';
 import { mkdir, readdir, rename, rm, stat } from 'node:fs/promises';
-import { PRESSABLE, PROFILE, dialogLine, legacyProfile, optionFor, readOnlyRefusal, refusal, scriptExpression, scrollTarget, typable } from './guard.js';
+import { PRESSABLE, PROFILE, PROFILE_LOCKS, dialogLine, legacyProfile, optionFor, readOnlyRefusal, refusal, scriptExpression, scrollTarget, typable } from './guard.js';
 import type { ScrollTarget } from './guard.js';
 import { startProxy } from './proxy.js';
 import type { Proxy } from './proxy.js';
@@ -93,6 +93,10 @@ async function session(profile: string): Promise<Session> {
     let s = sessions.get(profile);
     if (!s) {
         await mkdir(`${PROFILES_DIR}/${profile}`, { recursive: true });
+        // spec: services/browser/BRIEF.md#решения — the lock of the last run would hold a browser with a window on a question
+        for (const lock of PROFILE_LOCKS) {
+            await rm(`${PROFILES_DIR}/${profile}/${lock}`, { force: true }).catch(() => {});
+        }
         // hosts the owner allowed for the current page; every navigation sets them anew
         const allowed = new Set<string>();
         // spec: brief/internet.md#как-сделано-поиск-чтение-и-браузер — every connection of the browser goes through a proxy that

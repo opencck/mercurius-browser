@@ -220,6 +220,13 @@ export const PRESSABLE = [
         .map((role) => `[role=${role}]`),
 ].join(', ');
 
+/**
+ * The lock Chromium leaves in a profile: it names the host and the process that hold the profile. A container that
+ * started anew has another host name, and Chromium with a window then asks on the screen whether the profile may be
+ * taken and waits forever; the service is the only one that opens a profile, so the lock of the last run is removed.
+ */
+export const PROFILE_LOCKS = ['SingletonLock', 'SingletonCookie', 'SingletonSocket'];
+
 export const PROFILE = /^p\d{1,10}(?:\/projects\/\d{1,10})?\/[a-z0-9][a-z0-9_-]{0,31}$/;
 
 /** A folder of the old flat layout (a profile name at the top), which `adopt` moves into the owner's set. */

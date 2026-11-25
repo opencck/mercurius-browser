@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { PRESSABLE, dialogLine, optionFor, scrollTarget } from '../src/guard.js';
+import { PRESSABLE, PROFILE_LOCKS, dialogLine, optionFor, scrollTarget } from '../src/guard.js';
 
 const options = [
     { value: '', text: 'Выберите город' },
@@ -23,6 +23,10 @@ test('an item of a menu, a tab and a tick are pressable, as links and buttons ar
         assert.ok(pressable.includes(wanted), wanted);
     }
     assert.ok(!pressable.some((selector) => selector.includes('div') || selector.includes('span')), 'a plain block is not pressable by itself');
+});
+
+test('the lock Chromium leaves in a profile is all of its three files', () => {
+    assert.deepEqual([...PROFILE_LOCKS].sort(), ['SingletonCookie', 'SingletonLock', 'SingletonSocket']);
 });
 
 test('a scroll goes most of a screen or to an end', () => {
