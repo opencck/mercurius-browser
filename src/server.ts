@@ -8,7 +8,7 @@ import type { Browser, Page } from 'puppeteer-core';
 import { spawn } from 'node:child_process';
 import { timingSafeEqual } from 'node:crypto';
 import { mkdir, readdir, rename, rm, stat } from 'node:fs/promises';
-import { PROFILE, dialogLine, legacyProfile, optionFor, readOnlyRefusal, refusal, scriptExpression, scrollTarget, typable } from './guard.js';
+import { PRESSABLE, PROFILE, dialogLine, legacyProfile, optionFor, readOnlyRefusal, refusal, scriptExpression, scrollTarget, typable } from './guard.js';
 import type { ScrollTarget } from './guard.js';
 import { startProxy } from './proxy.js';
 import type { Proxy } from './proxy.js';
@@ -197,7 +197,7 @@ interface Call {
 
 /** The page of a session as text plus the elements one can act on, each with a number, and the dialogs it dismissed. */
 async function snapshot(s: Session): Promise<Snapshot> {
-    const shown = await s.page.evaluate((max) => {
+    const shown = await s.page.evaluate((max, pressable) => {
         const visible = (el: Element) => {
             const r = el.getBoundingClientRect();
             const style = getComputedStyle(el);
@@ -206,7 +206,7 @@ async function snapshot(s: Session): Promise<Snapshot> {
         document.querySelectorAll('[data-mercurius-ref]').forEach((el) => el.removeAttribute('data-mercurius-ref'));
         const elements: string[] = [];
         let n = 0;
-        for (const el of document.querySelectorAll<ShownElement>('a[href], button, input, textarea, select, [role=button], [contenteditable=true]')) {
+        for (const el of document.querySelectorAll<ShownElement>(pressable)) {
             if (!visible(el) || n >= 200) {
                 continue;
             }
@@ -222,7 +222,7 @@ async function snapshot(s: Session): Promise<Snapshot> {
         }
         const text = (document.body ? document.body.innerText : '').replace(/\n{3,}/g, '\n\n').slice(0, max);
         return { url: location.href, title: document.title, text, elements };
-    }, TEXT_MAX);
+    }, TEXT_MAX, PRESSABLE);
     return { ...shown, dialogs: s.dialogs.splice(0) };
 }
 

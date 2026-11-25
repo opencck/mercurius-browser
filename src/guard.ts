@@ -208,6 +208,18 @@ export function typable(element: TypableElement | null | undefined): boolean {
  * `p<id>/projects/<project>/<name>`. Nothing else is taken: the agent computes the path, a name never climbs out.
  * spec: brief/agent-loop.md#раскладка-каталогов — profiles of the browser are laid out by participants and projects
  */
+/**
+ * What the agent may press or type into on a page: links, controls, and what a page built of plain blocks marks as one
+ * by its ARIA role — the items of a menu, tabs, options of a list, ticks. A sign-in page hides "log in with a username"
+ * in a menu of such items; without them the agent sees the words and cannot press them.
+ * spec: brief/internet.md#как-сделано-поиск-чтение-и-браузер
+ */
+export const PRESSABLE = [
+    'a[href]', 'button', 'input', 'textarea', 'select', 'summary', '[contenteditable=true]',
+    ...['button', 'link', 'menuitem', 'menuitemcheckbox', 'menuitemradio', 'option', 'tab', 'checkbox', 'radio', 'switch', 'treeitem']
+        .map((role) => `[role=${role}]`),
+].join(', ');
+
 export const PROFILE = /^p\d{1,10}(?:\/projects\/\d{1,10})?\/[a-z0-9][a-z0-9_-]{0,31}$/;
 
 /** A folder of the old flat layout (a profile name at the top), which `adopt` moves into the owner's set. */
