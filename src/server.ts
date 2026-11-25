@@ -3,12 +3,11 @@
 // spec: brief/internet.md#как-сделано-поиск-чтение-и-браузер
 
 import Fastify from 'fastify';
-import puppeteerCore from 'puppeteer-core';
-import { addExtra } from 'puppeteer-extra';
-import StealthPlugin from 'puppeteer-extra-plugin-stealth';
+import puppeteer from 'puppeteer-core';
 import type { Browser, Page } from 'puppeteer-core';
+import { spawn } from 'node:child_process';
 import { timingSafeEqual } from 'node:crypto';
-import { mkdir, readdir, rename, stat } from 'node:fs/promises';
+import { mkdir, readdir, rename, rm, stat } from 'node:fs/promises';
 import { PROFILE, dialogLine, legacyProfile, optionFor, readOnlyRefusal, refusal, scriptExpression, scrollTarget, typable } from './guard.js';
 import type { ScrollTarget } from './guard.js';
 import { startProxy } from './proxy.js';
@@ -40,12 +39,38 @@ try {
     process.exit(1);
 }
 
-// A site that sees "HeadlessChrome" or navigator.webdriver refuses the page (x.com answers 403, Google says the browser
-// may not be secure): the stealth plugin makes the headless Chromium look like an ordinary one.
-// ref: puppeteer-extra-plugin-stealth 2.11.2 (npm) — the evasions of user agent, webdriver, plugins, languages, WebGL
-//      vendor, chrome.runtime; no reference repository has an implementation of its own (hermes drives no Chromium)
-const puppeteer = addExtra(puppeteerCore as unknown as Parameters<typeof addExtra>[0]);
-puppeteer.use(StealthPlugin());
+// spec: services/browser/BRIEF.md#решения — the browser is an ordinary one: Chromium with a window, on a screen that
+//       exists only in memory. A site refuses a browser without a window (x.com answers 403 to "HeadlessChrome",
+//       Google says the browser may not be secure) and refuses one that pretends to be another system just as well,
+//       so nothing about the browser is faked: it tells the truth, and the truth is an ordinary Chromium on Linux.
+//       No reference repository has an implementation of its own (hermes drives no Chromium).
+const DISPLAY = ':99';
+/** the screen of an ordinary monitor; the window of the browser is smaller */
+const SCREEN = '1920x1080x24';
+
+/**
+ * Starts the screen the browsers draw on and keeps it up: a screen that died comes back in a second. A display given
+ * from outside (DISPLAY) is used as it is.
+ */
+async function display(): Promise<void> {
+    if ((process.env.DISPLAY ?? '') !== '') {
+        return;
+    }
+    process.env.DISPLAY = DISPLAY;
+    const number = DISPLAY.slice(1);
+    const start = async (): Promise<void> => {
+        // what a screen killed with the container left behind: its lock names a process that may be another one now
+        await rm(`/tmp/.X${number}-lock`, { force: true }).catch(() => {});
+        await rm(`/tmp/.X11-unix/X${number}`, { force: true }).catch(() => {});
+        const screen = spawn('Xvfb', [DISPLAY, '-screen', '0', SCREEN, '-nolisten', 'tcp'], { stdio: 'ignore' });
+        screen.on('error', (error) => {
+            console.error(`the screen of the browser did not start: ${error.message}`);
+            process.exit(1);
+        });
+        screen.on('exit', () => setTimeout(() => void start(), 1000));
+    };
+    await start();
+}
 /** the window of an ordinary laptop: a viewport of 1280×900 in a window of that size */
 const WIDTH = 1280;
 const HEIGHT = 900;
@@ -76,13 +101,15 @@ async function session(profile: string): Promise<Session> {
         const browser = await puppeteer.launch({
             executablePath: process.env.CHROMIUM_PATH ?? '/usr/bin/chromium',
             userDataDir: `${PROFILES_DIR}/${profile}`,
-            headless: true,
-            // the switch that announces automation goes; the window has the size of the viewport
+            headless: false,
+            // the switch that announces automation goes; the window has the size of the viewport and shows no bubbles
+            // of its own over the page
             ignoreDefaultArgs: ['--enable-automation'],
             args: ['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu', '--no-first-run', '--lang=ru-RU',
+                '--no-default-browser-check', '--hide-crash-restore-bubble', '--disable-session-crashed-bubble',
                 '--disable-blink-features=AutomationControlled', `--window-size=${WIDTH},${HEIGHT}`,
                 `--proxy-server=http://127.0.0.1:${proxy.port}`, '--proxy-bypass-list=<-loopback>'],
-        }) as unknown as Browser;
+        });
         // dialogs the pages opened since the last answer, already dismissed; the next snapshot tells the agent
         const dialogs: string[] = [];
         const guard = async (tab: Page) => {
@@ -124,8 +151,7 @@ async function session(profile: string): Promise<Session> {
                 old.close().catch(() => {});
             }
         });
-        // the stealth plugins patch the tabs created after the start; the tab Chromium opened by itself is not one of
-        // them, so the service works in a tab of its own and closes the first
+        // the service works in one tab: its own; what Chromium opened at the start (the tabs of the last run) goes
         const first = await browser.pages();
         const page = await browser.newPage();
         for (const tab of first) {
@@ -524,4 +550,5 @@ for (const signal of ['SIGTERM', 'SIGINT']) {
     });
 }
 
+await display();
 await app.listen({ host: '0.0.0.0', port: Number(process.env.PORT ?? 3000) });

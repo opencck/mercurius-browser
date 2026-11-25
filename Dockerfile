@@ -1,4 +1,5 @@
-# The browser of the agent: Chromium from Debian under puppeteer-core, a Fastify API on port 3000.
+# The browser of the agent: Chromium from Debian with a window on a screen in memory (Xvfb), under puppeteer-core;
+# a Fastify API on port 3000.
 # spec: brief/internet.md#как-сделано-поиск-чтение-и-браузер
 
 # Build: TypeScript compiled to dist/ with the dev dependencies, which stay in this stage.
@@ -11,7 +12,7 @@ RUN npm run build
 
 FROM node:22-bookworm-slim
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends chromium fonts-dejavu-core fonts-noto-color-emoji ca-certificates dumb-init \
+    && apt-get install -y --no-install-recommends chromium xvfb fonts-dejavu-core fonts-noto-color-emoji ca-certificates dumb-init \
     && rm -rf /var/lib/apt/lists/* \
     && useradd -m -u 10010 browser \
     && mkdir -p /profiles && chown browser:browser /profiles

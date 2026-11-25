@@ -1,7 +1,7 @@
 {
     "name": "mercurius-browser",
     "private": true,
-    "description": "The browser of the Mercurius agent: Chromium under puppeteer-core behind a small Fastify API",
+    "description": "The browser of the Mercurius agent: Chromium with a window under puppeteer-core behind a small Fastify API",
     "license": "MIT",
     "type": "module",
     "main": "dist/src/server.js",
@@ -15,9 +15,7 @@
     },
     "dependencies": {
         "fastify": "4.28.1",
-        "puppeteer-core": "23.11.1",
-        "puppeteer-extra": "3.3.6",
-        "puppeteer-extra-plugin-stealth": "2.11.2"
+        "puppeteer-core": "23.11.1"
     },
     "devDependencies": {
         "@eslint/js": "10.0.1",
