@@ -22,6 +22,7 @@ names a profile whose logins survive restarts (`[a-z0-9][a-z0-9_-]{0,31}`).
 | `POST /back` | goes back in the page's history |
 | `POST /evaluate` | runs a script: on a frozen offline copy to read, or on the live page to act |
 | `POST /screenshot` | a PNG of the page |
+| `POST /reset` | `kind`: `cache` — clears the caches of the profile (the sign-ins stay), `profile` — removes the whole profile |
 | `POST /close` | closes the profile's page |
 | `POST /adopt` | moves profiles of the old flat layout into the owner's set (`{"owner":"p1"}`), logins stay |
 

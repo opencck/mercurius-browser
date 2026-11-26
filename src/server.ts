@@ -8,7 +8,7 @@ import type { Browser, Page } from 'puppeteer-core';
 import { spawn } from 'node:child_process';
 import { timingSafeEqual } from 'node:crypto';
 import { mkdir, readdir, rename, rm, stat } from 'node:fs/promises';
-import { PRESSABLE, PROFILE, PROFILE_LOCKS, dialogLine, legacyProfile, optionFor, readOnlyRefusal, refusal, scriptExpression, scrollTarget, typable } from './guard.js';
+import { PRESSABLE, PROFILE, PROFILE_LOCKS, dialogLine, legacyProfile, optionFor, readOnlyRefusal, refusal, resetTargets, scriptExpression, scrollTarget, typable } from './guard.js';
 import type { ScrollTarget } from './guard.js';
 import { startProxy } from './proxy.js';
 import type { Proxy } from './proxy.js';
@@ -539,6 +539,18 @@ app.post<Call>('/adopt', async (request, reply) => {
         moved.push(name);
     }
     return { moved };
+});
+
+// spec: brief/internet.md#как-сделано-поиск-чтение-и-браузер — the cache or the whole profile goes; the session closes first
+app.post<Call>('/reset', async (request, reply) => {
+    const { profile = 'main', kind = 'cache' } = request.body ?? {};
+    const targets = resetTargets(`${PROFILES_DIR}/${String(profile)}`, String(kind));
+    if (targets.length === 0) {
+        return reply.code(400).send({ error: 'kind — cache или profile' });
+    }
+    await close(String(profile));
+    await Promise.all(targets.map((path) => rm(path, { recursive: true, force: true })));
+    return { ok: true, kind: String(kind) };
 });
 
 app.post<Call>('/close', async (request) => {

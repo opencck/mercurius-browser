@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { PRESSABLE, PROFILE_LOCKS, dialogLine, optionFor, scrollTarget } from '../src/guard.js';
+import { PRESSABLE, PROFILE_LOCKS, dialogLine, optionFor, resetTargets, scrollTarget } from '../src/guard.js';
 
 const options = [
     { value: '', text: 'Выберите город' },
@@ -40,4 +40,14 @@ test('a scroll goes most of a screen or to an end', () => {
 test('a dialog becomes one short line', () => {
     assert.equal(dialogLine('alert', 'Сессия\nистекла'), 'alert: Сессия истекла');
     assert.equal(dialogLine('confirm', 'x'.repeat(600)).length, 'confirm: '.length + 500);
+});
+
+test('a reset of the cache takes the caches of the profile only; a reset of the profile takes its folder', () => {
+    const cache = resetTargets('/profiles/p7/main', 'cache');
+    assert.ok(cache.includes('/profiles/p7/main/Default/Cache'));
+    assert.ok(cache.includes('/profiles/p7/main/Default/Code Cache'));
+    assert.ok(cache.every((path: string) => path.startsWith('/profiles/p7/main/')), 'nothing outside the profile');
+    assert.ok(!cache.some((path: string) => /Cookies|Login Data|Local Storage/.test(path)), 'the sign-ins stay');
+    assert.deepEqual(resetTargets('/profiles/p7/main', 'profile'), ['/profiles/p7/main']);
+    assert.deepEqual(resetTargets('/profiles/p7/main', 'other'), [], 'nothing for an unknown kind');
 });

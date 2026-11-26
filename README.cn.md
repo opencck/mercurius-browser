@@ -24,6 +24,7 @@
 | `POST /back` | 在页面历史中后退 |
 | `POST /evaluate` | 运行脚本：在冻结的离线副本上读取，或在实时页面上操作 |
 | `POST /screenshot` | 页面的 PNG 截图 |
+| `POST /reset` | `kind`: `cache` —— 清除配置文件的缓存（登录保留），`profile` —— 删除整个配置文件 |
 | `POST /close` | 关闭该配置文件的页面 |
 | `POST /adopt` | 把旧的扁平结构的配置文件移入所有者的集合（`{"owner":"p1"}`），登录状态保留 |
 

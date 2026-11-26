@@ -229,6 +229,21 @@ export const PROFILE_LOCKS = ['SingletonLock', 'SingletonCookie', 'SingletonSock
 
 export const PROFILE = /^p\d{1,10}(?:\/projects\/\d{1,10})?\/[a-z0-9][a-z0-9_-]{0,31}$/;
 
+/** The caches of a Chromium profile: what a page loaded, compiled code, the GPU, the storage of service workers. */
+const CACHES = ['Default/Cache', 'Default/Code Cache', 'Default/GPUCache', 'Default/Service Worker/CacheStorage', 'Default/Service Worker/ScriptCache', 'GrShaderCache', 'GraphiteDawnCache', 'ShaderCache'];
+
+/**
+ * What a reset of a profile removes: `cache` — the caches only, the sign-ins (cookies, saved data) stay; `profile` —
+ * the whole folder, the next open starts a new one. Nothing outside the folder of the profile.
+ * spec: brief/internet.md#как-сделано-поиск-чтение-и-браузер — the owner asks to clear the browser
+ */
+export function resetTargets(dir: string, kind: string): string[] {
+    if (kind === 'profile') {
+        return [dir];
+    }
+    return kind === 'cache' ? CACHES.map((path) => `${dir}/${path}`) : [];
+}
+
 /** A folder of the old flat layout (a profile name at the top), which `adopt` moves into the owner's set. */
 export function legacyProfile(name: string): boolean {
     return /^[a-z0-9][a-z0-9_-]{0,31}$/.test(name) && !/^p\d{1,10}$/.test(name);
