@@ -235,7 +235,7 @@ const CACHES = ['Default/Cache', 'Default/Code Cache', 'Default/GPUCache', 'Defa
 /**
  * What a reset of a profile removes: `cache` — the caches only, the sign-ins (cookies, saved data) stay; `profile` —
  * the whole folder, the next open starts a new one. Nothing outside the folder of the profile.
- * spec: brief/internet.md#как-сделано-поиск-чтение-и-браузер — the owner asks to clear the browser
+ * spec: brief/internet.md#сброс-профиля-браузера-и-маршруты-выхода — the owner asks to clear the browser
  */
 export function resetTargets(dir: string, kind: string): string[] {
     if (kind === 'profile') {

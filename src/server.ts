@@ -541,7 +541,7 @@ app.post<Call>('/adopt', async (request, reply) => {
     return { moved };
 });
 
-// spec: brief/internet.md#как-сделано-поиск-чтение-и-браузер — the cache or the whole profile goes; the session closes first
+// spec: brief/internet.md#сброс-профиля-браузера-и-маршруты-выхода — the cache or the whole profile goes; the session closes first
 app.post<Call>('/reset', async (request, reply) => {
     const { profile = 'main', kind = 'cache' } = request.body ?? {};
     const targets = resetTargets(`${PROFILES_DIR}/${String(profile)}`, String(kind));
